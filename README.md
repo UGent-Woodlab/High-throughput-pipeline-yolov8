@@ -13,7 +13,7 @@
 [^aut]: author
 [^cre]: contact person
 [^UG-WL]: UGent-Woodlab
-[^AI-RO]AI and Robotics Lab, IDLab-AIRO
+[^AI-RO]: AI and Robotics Lab, IDLab-AIRO
 
 
 <p align="left">
