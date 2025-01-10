@@ -5,6 +5,17 @@
     <h1 align="center">YoloAnatomy</h1>
 </p>
 
+
+[Verschuren, Louis![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0002-3102-4588)[^aut][^cre][^UG-WL];
+[Van den Bulcke, Jan![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0003-2939-5408)[^aut][^UG-WL];
+[Wyffels, Francis![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0002-5491-8349)[^aut][^^AI-RO];
+
+[^aut]: author
+[^cre]: contact person
+[^UG-WL]: UGent-Woodlab
+[^AI-RO]AI and Robotics Lab, IDLab-AIRO
+
+
 <p align="left">
    This is the repository for a Python routine which is used to train a YOLOv8 deep learning segmentation model and subsequently uses it to do fully automated analysis of gigapixel sized images, here exemplified for the quantification of vessels and rays on full disc surfaces and increment cores. 
 </p>
