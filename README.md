@@ -73,13 +73,13 @@ Before running the notebooks, ensure that you have the following dependencies in
 - from torchvision.ops import nms
 - math
 
-A trained network example and accompanying training data are available on [Zenodo](http://google.com).
+A trained network example and accompanying training data are available on Zenodo (see 'Cite our work').
 
 ---
 
 ## Cite our work
 
-You can find the paper where the entire system is described [here](TO DO), or cite our work with the following bibtex snippet:
+You can find the paper where the entire pipeline is described [here](TO DO), or cite our work with the following bibtex snippet:
 
 ```tex
 TODO
