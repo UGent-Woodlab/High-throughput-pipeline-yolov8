@@ -87,7 +87,7 @@ TODO
 
 The software for image acquisition with the Gigapixel Woodbot can be found [here](https://github.com/UGent-Woodlab/Gigapixel-Woodbot), the trained YOLOv8 model and training data can be found [here](https://doi.org/10.5281/zenodo.14604996), the increment core images can be found [here](https://doi.org/10.5281/zenodo.14627909) and the disk images [here](TO DO).
 
-When using any of the software, also cite the proper Zenodo DOI ([here](https://doi.org/10.5281/zenodo.14637855) and [here](https://doi.org/10.5281/zenodo.14637832)) related to the releases of the software.
+When using any of the software, also cite the proper Zenodo DOI ([here for analysis](https://doi.org/10.5281/zenodo.14637855) and [here for imaging](https://doi.org/10.5281/zenodo.14637832)) related to the releases of the software.
 
 ---
 
