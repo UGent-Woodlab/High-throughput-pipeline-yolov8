@@ -93,6 +93,6 @@ When using any of the software, also cite the proper Zenodo DOI (TO DO) related 
 
 ##  License
 
-This software is protected under the [GNU AGPLv3](https://choosealicense.com/licenses/agpl-3.0/) license. The images and trained models are protected under the [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) license. 
+This software is protected under the [GNU AGPLv3](https://choosealicense.com/licenses/agpl-3.0/) license. 
 
 ---
