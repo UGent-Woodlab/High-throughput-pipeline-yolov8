@@ -83,7 +83,7 @@ A trained network example and accompanying training data are available on Zenodo
 
 ## Cite our work
 
-You can find the paper where the entire pipeline is described [here](TO DO), or cite our work with the following bibtex snippet:
+You can find the paper where the entire pipeline is described [here](http://doi.org/10.1186/s13007-025-01330-7), or cite our work with the following bibtex snippet:
 
 ```tex
 TODO
