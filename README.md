@@ -87,7 +87,31 @@ A trained network example and accompanying training data are available on Zenodo
 You can find the paper where the entire pipeline is described [here](https://doi.org/10.1186/s13007-025-01330-7), or cite our work with the following bibtex snippet:
 
 ```tex
-TODO
+\cite(VandenBulcke2025, software2025)
+
+﻿@Article{VandenBulcke2025,
+author={{Van den Bulcke}, Jan and Verschuren, Louis and De Blaere, Ruben and Vansuyt, Simon and Dekegeleer, Maxime and Kibleur, Pierre and Pieters, Olivier and De Mil, Tom and Hubau, Wannes and Beeckman, Hans and Van Acker, Joris and Wyffels, Francis},
+title={Enabling high-throughput quantitative wood anatomy through a dedicated pipeline},
+journal={Plant Methods},
+year={2025},
+month={Feb},
+day={04},
+volume={21},
+number={1},
+pages={11},
+issn={1746-4811},
+doi={10.1186/s13007-025-01330-7}
+}
+
+@software{software2025,
+  author       = {{Van den Bulcke}, Jan and Verschuren, Louis and Wyffels, Francis}, 
+  title        = {UGent-Woodlab/High-throughput-pipeline-yolov8},
+  month        = jan,
+  year         = 2025,
+  publisher    = {Zenodo},
+  doi          = {10.5281/zenodo.14637854}
+}
+
 ```
 
 The software for image acquisition with the Gigapixel Woodbot can be found [here](https://github.com/UGent-Woodlab/Gigapixel-Woodbot), the trained YOLOv8 model and training data can be found [here](https://doi.org/10.5281/zenodo.14604996), the increment core images can be found [here](https://doi.org/10.5281/zenodo.14627909) and the disk images [here](https://doi.org/10.6019/S-BIAD1574).
