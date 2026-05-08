@@ -3,20 +3,18 @@
 </p>
 
 <p align="center">
-  <h1 align="center">YoloAnatomy</h1>
+  <h1 align="left">YoloAnatomy</h1>
 </p>
 
-<p align="center">
+<p align="left">
   <strong>High-throughput YOLO-based wood anatomy segmentation and quantification</strong>
 </p>
 
-<p align="center">
-  <a href="https://doi.org/10.5281/zenodo.14637854">
-    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.14637854.svg" alt="DOI">
-  </a>
-</p>
 
-<p align="center">
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14637854.svg)](https://doi.org/10.5281/zenodo.14637854)
+
+
+<p align="left">
   <img src="https://img.shields.io/badge/Python-3776AB.svg?style=default&logo=Python&logoColor=white" alt="Python">
   <img src="https://img.shields.io/badge/Ultralytics-YOLO-blue" alt="Ultralytics YOLO">
   <img src="https://img.shields.io/badge/NumPy-013243.svg?style=default&logo=NumPy&logoColor=white" alt="NumPy">
