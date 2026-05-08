@@ -78,6 +78,7 @@ Main features:
 - pads images smaller than the crop size onto a black canvas;
 - optionally saves one reproducibly random crop per source image into a `selection/` folder.
 
+---
 
 ### 2. Train a YOLO segmentation model
 
