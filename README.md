@@ -50,29 +50,10 @@ The pipeline supports:
 - optionally uploading trained weights to Roboflow;
 - tiled full-image segmentation using a sliding-window approach;
 - exporting binary masks for anatomical features such as vessels, rays, fibers, and parenchyma;
-- optional overlap resolution between feature masks;
-- optional cell-wall mask calculation;
 - optional object-level measurements;
-- optional vessel-group detection based on proximity.
+- optional vessel-group detection.
 
 The workflow is designed for high-throughput quantitative wood anatomy, including full disc surfaces, increment cores, and other large microscopy image datasets.
-
----
-
-## Repository structure
-
-Recommended project folder structure:
-
-```text
-PROJECT_ROOT/
-  raw_images/              original full-size images
-  cropped/                 YOLO-sized image crops
-    selection/             optional random crop selection for inspection
-  trainingdata/            YOLO dataset folder containing data.yaml
-  training_runs/           output folder for YOLO training runs
-  models/                  copied or final model weights
-  segmentation_output/     segmentation masks, overlays, and measurements
-```
 
 ---
 
@@ -97,24 +78,6 @@ Main features:
 - pads images smaller than the crop size onto a black canvas;
 - optionally saves one reproducibly random crop per source image into a `selection/` folder.
 
-Important settings to edit:
-
-```python
-PROJECT_ROOT = r"..."
-RAW_IMAGES_FOLDER = os.path.join(PROJECT_ROOT, "raw_images")
-CROPS_OUTPUT_FOLDER = os.path.join(PROJECT_ROOT, "cropped")
-CROP_SIZE = (640, 640)
-OUTPUT_FORMAT = "png"
-SAVE_RANDOM_SELECTION_PER_IMAGE = True
-```
-
-Run:
-
-```bash
-python cropimages.py
-```
-
----
 
 ### 2. Train a YOLO segmentation model
 
@@ -139,41 +102,6 @@ Main features:
 - CUDA/GPU validation before training;
 - saved plots and training diagnostics when enabled.
 
-Important settings to edit:
-
-```python
-PROJECT_ROOT = r"..."
-DATASET_FOLDER = os.path.join(PROJECT_ROOT, "trainingdata")
-DATA_YAML = os.path.join(DATASET_FOLDER, "data.yaml")
-
-RUNS_ROOT = os.path.join(PROJECT_ROOT, "training_runs")
-RUN_NAME = "ModelV1"
-
-PRETRAINED_MODEL = "yolo26l-seg.pt"
-
-BATCH_SIZE = 8
-EPOCHS = 300
-IMAGE_SIZE = 640
-DEVICE = 0
-```
-
-Run:
-
-```bash
-python YoloTrain.py
-```
-
-The trained model weights are normally saved in:
-
-```text
-PROJECT_ROOT/training_runs/RUN_NAME/weights/
-```
-
-For most applications, use:
-
-```text
-best.pt
-```
 
 ---
 
@@ -192,41 +120,6 @@ Main features:
 - reads the Roboflow API key from an environment variable;
 - validates that the selected `best.pt` or `last.pt` file exists;
 - uploads the model to a selected Roboflow workspace, project, and version.
-
-Important settings to edit:
-
-```python
-PROJECT_ROOT = r"..."
-
-TRAINING_RUNS_ROOT = os.path.join(PROJECT_ROOT, "training_runs")
-TRAINING_RUN_NAME = "ModelV1"
-WEIGHTS_FILENAME = "best.pt"
-
-WORKSPACE_NAME = "ugent-woodlab"
-PROJECT_NAME = "your-roboflow-project"
-PROJECT_VERSION = 1
-MODEL_TYPE = "yolov26"
-```
-
-Set the API key before running the script.
-
-Windows PowerShell:
-
-```powershell
-$env:ROBOFLOW_API_KEY="your_key_here"
-```
-
-Windows Command Prompt:
-
-```cmd
-set ROBOFLOW_API_KEY=your_key_here
-```
-
-Run:
-
-```bash
-python uploadYOLOtoRoboflow.py
-```
 
 ---
 
@@ -258,186 +151,6 @@ Main features:
 - optionally groups vessels based on distance;
 - supports controlled RGB conversion for grayscale, TIFF, OME-TIFF, uint16, float, and multichannel images.
 
-Important settings to edit:
-
-```python
-INPUT_FOLDER = r"..."
-OUTPUT_ROOT = r"..."
-MODEL_WEIGHTS = r"...\best.pt"
-
-SUB_IMAGE_SIZE = 640
-OVERLAP_PERCENT = 0.5
-IOU_NMS = 0.3
-
-SAVE_OVERLAY_IMAGES = True
-RESOLVE_OVERLAPS = True
-OUTPUT_CELLWALL_MASK = True
-```
-
-Feature configuration example:
-
-```python
-FEATURES = {
-    "vessels": {
-        "enabled": True,
-        "class_id": 0,
-        "conf": 0.5,
-        "large_fov": False,
-    },
-    "rays": {
-        "enabled": False,
-        "class_id": 1,
-        "conf": 0.2,
-        "large_fov": False,
-    },
-    "fibers": {
-        "enabled": False,
-        "class_id": 0,
-        "conf": 0.2,
-        "large_fov": False,
-    },
-    "parenchyma": {
-        "enabled": False,
-        "class_id": 3,
-        "conf": 0.2,
-        "large_fov": False,
-    },
-}
-```
-
-Run:
-
-```bash
-python YoloAntomicalSeg.py
-```
-
----
-
-## Output structure
-
-The segmentation script creates an output folder with logically separated results.
-
-Example:
-
-```text
-OUTPUT_ROOT/
-  run_config.txt
-
-  masks/
-    vessels/
-    rays/
-    fibers/
-    parenchyma/
-    cellwallmask/
-
-  overlays/
-
-  borders/
-    vessels/
-    rays/
-    fibers/
-    parenchyma/
-
-  measurements/
-    all_features_properties.csv
-    vessels_properties.csv
-    rays_properties.csv
-    fibers_properties.csv
-    parenchyma_properties.csv
-
-    vessels_segmented/
-    rays_segmented/
-    fibers_segmented/
-    parenchyma_segmented/
-
-    vessel_groups/
-```
-
-Not all folders are created every time. The script only creates folders for enabled features and enabled analysis steps.
-
----
-
-## Measurement stage
-
-The measurement stage is optional and can be enabled with:
-
-```python
-RUN_MEASUREMENT_STAGE = True
-```
-
-When enabled, the script can measure selected anatomical features using reconstructed YOLO instance borders.
-
-Measurements include:
-
-- object label;
-- centroid coordinates in pixels and meters;
-- equivalent diameter;
-- area;
-- fourth power of diameter;
-- image size;
-- perimeter information;
-- edge-correction information;
-- pixel size;
-- optional vessel group ID.
-
-Set the pixel size here:
-
-```python
-PIXEL_SIZE_M = 1e-6
-```
-
-Select which features to measure:
-
-```python
-MEASURE_FEATURES = {
-    "vessels": True,
-    "rays": False,
-    "fibers": False,
-    "parenchyma": False,
-}
-```
-
----
-
-## Vessel grouping
-
-Vessel grouping is optional and can be enabled with:
-
-```python
-CALCULATE_VESSEL_GROUPS = True
-VESSEL_GROUP_DISTANCE_UM = 15.0
-```
-
-Vessels are assigned to the same group when the closest points of their masks are within the selected distance threshold. Grouping is transitive: if vessel A is close to vessel B, and vessel B is close to vessel C, all three vessels are assigned to the same group.
-
-When enabled, vessel group numbers are written to the measurement CSV and optional vessel-group visualization images can be saved.
-
----
-
-## OME-TIFF and special image formats
-
-OME-TIFF support can be enabled with:
-
-```python
-USE_OME_TIFF_READER = True
-OME_READ_INDEX = 0
-```
-
-The segmentation script includes controlled image normalization for non-uint8 images. This is useful for microscopy images stored as grayscale, uint16, float, multichannel TIFF, or OME-TIFF data.
-
-Available normalization modes:
-
-```python
-NORMALIZATION_MODE = "percentile"
-NORMALIZATION_MODE = "minmax"
-NORMALIZATION_MODE = "fixed_16bit"
-```
-
-The default is:
-
-```python
-NORMALIZATION_MODE = "percentile"
-```
 
 ---
 
@@ -496,20 +209,19 @@ The scripts use:
 
 ---
 
-## Example end-to-end use
+## Repository structure
 
-```bash
-# 1. Crop raw images into YOLO-sized tiles
-python cropimages.py
+Recommended project folder structure:
 
-# 2. Train a YOLO segmentation model
-python YoloTrain.py
-
-# 3. Optional: upload trained weights to Roboflow
-python uploadYOLOtoRoboflow.py
-
-# 4. Segment full images and optionally measure anatomical features
-python YoloAntomicalSeg.py
+```text
+PROJECT_ROOT/
+  raw_images/              original full-size images
+  cropped/                 YOLO-sized image crops
+    selection/             optional random crop selection for inspection
+  trainingdata/            YOLO dataset folder containing data.yaml
+  training_runs/           output folder for YOLO training runs
+  models/                  copied or final model weights
+  segmentation_output/     segmentation masks, overlays, and measurements
 ```
 
 ---
