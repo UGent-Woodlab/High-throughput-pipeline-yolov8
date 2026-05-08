@@ -231,10 +231,6 @@ PROJECT_ROOT/
 
 A trained network example and accompanying training data are available on Zenodo.
 
-The software for image acquisition with the Gigapixel Woodbot can be found here:
-
-https://github.com/UGent-Woodlab/Gigapixel-Woodbot
-
 The trained YOLO model and training data can be found here:
 
 https://doi.org/10.5281/zenodo.14604996
@@ -247,10 +243,6 @@ The disk images can be found here:
 
 https://doi.org/10.6019/S-BIAD1574
 
-When using the software, please also cite the relevant Zenodo DOI for the software release:
-
-- analysis software: https://doi.org/10.5281/zenodo.14637855
-- imaging software: https://doi.org/10.5281/zenodo.14637832
 
 ---
 
