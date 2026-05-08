@@ -1,127 +1,585 @@
 <p align="center">
-  <img src="./Fig.JPG" width="100%" alt="logo">
+  <img src="./Fig.JPG" width="100%" alt="YoloAnatomy logo">
 </p>
 
 <p align="center">
-    <h1 align="center">YoloAnatomy</h1>
+  <h1 align="center">YoloAnatomy</h1>
 </p>
-
-
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.14637854.svg)](https://doi.org/10.5281/zenodo.14637854)
-
-
-[Verschuren, Louis![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0002-3102-4588)[^aut][^cre][^UG-WL];
-[Wyffels, Francis![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0002-5491-8349)[^aut][^AI-RO];
-[Van den Bulcke, Jan![ORCID logo](https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png)](https://orcid.org/0000-0003-2939-5408)[^aut][^UG-WL]
-
-[^aut]: author
-[^cre]: contact person
-[^UG-WL]: UGent-Woodlab
-[^AI-RO]: AI and Robotics Lab, IDLab-AIRO
-
-
-<p align="left">
-   This is the repository for a Python routine which is used to train a YOLOv8 deep learning segmentation model and subsequently uses it to do fully automated analysis of gigapixel sized images, here exemplified for the quantification of vessels and rays on full disc surfaces and increment cores. 
-</p>
-
 
 <p align="center">
-	<!-- local repository, no metadata badges. --></p>
-<p align="center">
-		<em>Built with the tools and technologies:</em>
+  <strong>High-throughput YOLO-based wood anatomy segmentation and quantification</strong>
 </p>
+
 <p align="center">
-	<img src="https://img.shields.io/badge/Python-3776AB.svg?style=default&logo=Python&logoColor=white" alt="Python">
-	<img src="https://img.shields.io/badge/NumPy-013243.svg?style=default&logo=NumPy&logoColor=white" alt="NumPy">
-	<img src="https://img.shields.io/badge/yolo-8-blue" alt="YOLOv8">	
+  <a href="https://doi.org/10.5281/zenodo.14637854">
+    <img src="https://zenodo.org/badge/DOI/10.5281/zenodo.14637854.svg" alt="DOI">
+  </a>
 </p>
-<br>
 
-#####  Table of Contents
-
-- [ Crop images](#crop-images-crop-imagesipynb)
-- [ Model training](#model-training-yolo8-vessel-detector-trainipynb)
-- [ Image analysis](#image-analysis-sliding-window-yolov8-maskipynb)
-- [ Getting Started](#getting-started)
-- [ Cite our work](#cite-our-work)
-- [ License](#license)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3776AB.svg?style=default&logo=Python&logoColor=white" alt="Python">
+  <img src="https://img.shields.io/badge/Ultralytics-YOLO-blue" alt="Ultralytics YOLO">
+  <img src="https://img.shields.io/badge/NumPy-013243.svg?style=default&logo=NumPy&logoColor=white" alt="NumPy">
+  <img src="https://img.shields.io/badge/OpenCV-5C3EE8.svg?style=default&logo=OpenCV&logoColor=white" alt="OpenCV">
+  <img src="https://img.shields.io/badge/scikit--image-F7931E.svg?style=default&logo=scikitlearn&logoColor=white" alt="scikit-image">
+</p>
 
 ---
 
-##  Crop images: crop-images.ipynb
-This will take all images from a specified folder and crops them to 640 x 640 images which can be used for annotation. 640 x 640 is the standard image size for YOLOv8. 
+## Authors
+
+[Verschuren, Louis <img src="https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png" alt="ORCID logo">](https://orcid.org/0000-0002-3102-4588)[^aut][^cre][^UG-WL];  
+[Wyffels, Francis <img src="https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png" alt="ORCID logo">](https://orcid.org/0000-0002-5491-8349)[^aut][^AI-RO];  
+[Van den Bulcke, Jan <img src="https://info.orcid.org/wp-content/uploads/2019/11/orcid_16x16.png" alt="ORCID logo">](https://orcid.org/0000-0003-2939-5408)[^aut][^UG-WL]
+
+[^aut]: author  
+[^cre]: contact person  
+[^UG-WL]: UGent-Woodlab  
+[^AI-RO]: AI and Robotics Lab, IDLab-AIRO  
 
 ---
 
-## Model training: yolo8-vessel-detector-train.ipynb
-This will train a YOLOv8 segentation model from an annotated training dataset. Training data can be created using [Roboflow](https://roboflow.com/). Depening on the datset size and application, different augmentation parameters can be chosen.
+## Overview
+
+**YoloAnatomy** is a Python-based pipeline for training YOLO segmentation models and applying them to large microscopy or gigapixel-scale wood anatomy images.
+
+The pipeline supports:
+
+- cropping large images into YOLO-sized training tiles;
+- training an Ultralytics YOLO segmentation model;
+- optionally uploading trained weights to Roboflow;
+- tiled full-image segmentation using a sliding-window approach;
+- exporting binary masks for anatomical features such as vessels, rays, fibers, and parenchyma;
+- optional overlap resolution between feature masks;
+- optional cell-wall mask calculation;
+- optional object-level measurements;
+- optional vessel-group detection based on proximity.
+
+The workflow is designed for high-throughput quantitative wood anatomy, including full disc surfaces, increment cores, and other large microscopy image datasets.
 
 ---
 
-## Image analysis: sliding window Yolov8 mask.ipynb
-This segments all images in a specified folder using a trained YOLOv8 model. It creates binary masks for each of the classes in the model. This code can also count individual detections of objects, like individual vessels, and removes double detections. It uses a sliding window approach with a user defined overlap percentage. 
+## Repository structure
+
+Recommended project folder structure:
+
+```text
+PROJECT_ROOT/
+  raw_images/              original full-size images
+  cropped/                 YOLO-sized image crops
+    selection/             optional random crop selection for inspection
+  trainingdata/            YOLO dataset folder containing data.yaml
+  training_runs/           output folder for YOLO training runs
+  models/                  copied or final model weights
+  segmentation_output/     segmentation masks, overlays, and measurements
+```
 
 ---
 
-## Getting started
+## Workflow
 
-Before running the notebooks, ensure that you have the following dependencies installed:
-- from ultralytics import YOLO
-- os
-- from PIL import Image
-- numpy
-- torch
-- cv2
-- from pyometiff import OMETIFFReader
-- sys
-- from torchvision.ops import nms
-- math
+### 1. Crop images
 
-A trained network example and accompanying training data are available on Zenodo (see 'Cite our work').
+Script:
+
+```text
+cropimages.py
+```
+
+This script reads all supported images from a raw image folder and crops them into fixed-size YOLO training tiles, normally **640 × 640 px**.
+
+Main features:
+
+- reads common image formats, including `.jpg`, `.png`, `.tif`, `.tiff`, and `.bmp`;
+- converts images to RGB for consistent YOLO training input;
+- saves crops as PNG, JPG, or TIFF;
+- includes crop coordinates in each output filename;
+- pads images smaller than the crop size onto a black canvas;
+- optionally saves one reproducibly random crop per source image into a `selection/` folder.
+
+Important settings to edit:
+
+```python
+PROJECT_ROOT = r"..."
+RAW_IMAGES_FOLDER = os.path.join(PROJECT_ROOT, "raw_images")
+CROPS_OUTPUT_FOLDER = os.path.join(PROJECT_ROOT, "cropped")
+CROP_SIZE = (640, 640)
+OUTPUT_FORMAT = "png"
+SAVE_RANDOM_SELECTION_PER_IMAGE = True
+```
+
+Run:
+
+```bash
+python cropimages.py
+```
+
+---
+
+### 2. Train a YOLO segmentation model
+
+Script:
+
+```text
+YoloTrain.py
+```
+
+This script trains an Ultralytics YOLO segmentation model using a YOLO-format dataset.
+
+The dataset folder must contain a valid `data.yaml` file that defines the training and validation image paths and the class names.
+
+Main features:
+
+- configurable project folders;
+- configurable pretrained model or local `.pt` file;
+- optional class filtering;
+- documented augmentation settings;
+- reproducible training using a fixed random seed;
+- explicit control over the training output folder;
+- CUDA/GPU validation before training;
+- saved plots and training diagnostics when enabled.
+
+Important settings to edit:
+
+```python
+PROJECT_ROOT = r"..."
+DATASET_FOLDER = os.path.join(PROJECT_ROOT, "trainingdata")
+DATA_YAML = os.path.join(DATASET_FOLDER, "data.yaml")
+
+RUNS_ROOT = os.path.join(PROJECT_ROOT, "training_runs")
+RUN_NAME = "ModelV1"
+
+PRETRAINED_MODEL = "yolo26l-seg.pt"
+
+BATCH_SIZE = 8
+EPOCHS = 300
+IMAGE_SIZE = 640
+DEVICE = 0
+```
+
+Run:
+
+```bash
+python YoloTrain.py
+```
+
+The trained model weights are normally saved in:
+
+```text
+PROJECT_ROOT/training_runs/RUN_NAME/weights/
+```
+
+For most applications, use:
+
+```text
+best.pt
+```
+
+---
+
+### 3. Upload trained weights to Roboflow
+
+Script:
+
+```text
+uploadYOLOtoRoboflow.py
+```
+
+This optional script uploads trained YOLO weights to a Roboflow project version.
+
+Main features:
+
+- reads the Roboflow API key from an environment variable;
+- validates that the selected `best.pt` or `last.pt` file exists;
+- uploads the model to a selected Roboflow workspace, project, and version.
+
+Important settings to edit:
+
+```python
+PROJECT_ROOT = r"..."
+
+TRAINING_RUNS_ROOT = os.path.join(PROJECT_ROOT, "training_runs")
+TRAINING_RUN_NAME = "ModelV1"
+WEIGHTS_FILENAME = "best.pt"
+
+WORKSPACE_NAME = "ugent-woodlab"
+PROJECT_NAME = "your-roboflow-project"
+PROJECT_VERSION = 1
+MODEL_TYPE = "yolov26"
+```
+
+Set the API key before running the script.
+
+Windows PowerShell:
+
+```powershell
+$env:ROBOFLOW_API_KEY="your_key_here"
+```
+
+Windows Command Prompt:
+
+```cmd
+set ROBOFLOW_API_KEY=your_key_here
+```
+
+Run:
+
+```bash
+python uploadYOLOtoRoboflow.py
+```
+
+---
+
+### 4. Segment anatomical features and export masks
+
+Script:
+
+```text
+YoloAntomicalSeg.py
+```
+
+This is the main analysis script. It applies a trained YOLO segmentation model to all images in an input folder using a tiled sliding-window approach.
+
+Main features:
+
+- segments large images tile by tile;
+- supports overlapping tiles;
+- supports multiple anatomical feature classes:
+  - vessels;
+  - rays;
+  - fibers;
+  - parenchyma;
+- exports full-resolution binary masks;
+- optionally saves overlay images;
+- optionally resolves overlaps between feature masks using a priority order;
+- optionally calculates a cell-wall mask;
+- optionally reconstructs individual objects from YOLO instance borders;
+- optionally measures anatomical objects;
+- optionally groups vessels based on distance;
+- supports controlled RGB conversion for grayscale, TIFF, OME-TIFF, uint16, float, and multichannel images.
+
+Important settings to edit:
+
+```python
+INPUT_FOLDER = r"..."
+OUTPUT_ROOT = r"..."
+MODEL_WEIGHTS = r"...\best.pt"
+
+SUB_IMAGE_SIZE = 640
+OVERLAP_PERCENT = 0.5
+IOU_NMS = 0.3
+
+SAVE_OVERLAY_IMAGES = True
+RESOLVE_OVERLAPS = True
+OUTPUT_CELLWALL_MASK = True
+```
+
+Feature configuration example:
+
+```python
+FEATURES = {
+    "vessels": {
+        "enabled": True,
+        "class_id": 0,
+        "conf": 0.5,
+        "large_fov": False,
+    },
+    "rays": {
+        "enabled": False,
+        "class_id": 1,
+        "conf": 0.2,
+        "large_fov": False,
+    },
+    "fibers": {
+        "enabled": False,
+        "class_id": 0,
+        "conf": 0.2,
+        "large_fov": False,
+    },
+    "parenchyma": {
+        "enabled": False,
+        "class_id": 3,
+        "conf": 0.2,
+        "large_fov": False,
+    },
+}
+```
+
+Run:
+
+```bash
+python YoloAntomicalSeg.py
+```
+
+---
+
+## Output structure
+
+The segmentation script creates an output folder with logically separated results.
+
+Example:
+
+```text
+OUTPUT_ROOT/
+  run_config.txt
+
+  masks/
+    vessels/
+    rays/
+    fibers/
+    parenchyma/
+    cellwallmask/
+
+  overlays/
+
+  borders/
+    vessels/
+    rays/
+    fibers/
+    parenchyma/
+
+  measurements/
+    all_features_properties.csv
+    vessels_properties.csv
+    rays_properties.csv
+    fibers_properties.csv
+    parenchyma_properties.csv
+
+    vessels_segmented/
+    rays_segmented/
+    fibers_segmented/
+    parenchyma_segmented/
+
+    vessel_groups/
+```
+
+Not all folders are created every time. The script only creates folders for enabled features and enabled analysis steps.
+
+---
+
+## Measurement stage
+
+The measurement stage is optional and can be enabled with:
+
+```python
+RUN_MEASUREMENT_STAGE = True
+```
+
+When enabled, the script can measure selected anatomical features using reconstructed YOLO instance borders.
+
+Measurements include:
+
+- object label;
+- centroid coordinates in pixels and meters;
+- equivalent diameter;
+- area;
+- fourth power of diameter;
+- image size;
+- perimeter information;
+- edge-correction information;
+- pixel size;
+- optional vessel group ID.
+
+Set the pixel size here:
+
+```python
+PIXEL_SIZE_M = 1e-6
+```
+
+Select which features to measure:
+
+```python
+MEASURE_FEATURES = {
+    "vessels": True,
+    "rays": False,
+    "fibers": False,
+    "parenchyma": False,
+}
+```
+
+---
+
+## Vessel grouping
+
+Vessel grouping is optional and can be enabled with:
+
+```python
+CALCULATE_VESSEL_GROUPS = True
+VESSEL_GROUP_DISTANCE_UM = 15.0
+```
+
+Vessels are assigned to the same group when the closest points of their masks are within the selected distance threshold. Grouping is transitive: if vessel A is close to vessel B, and vessel B is close to vessel C, all three vessels are assigned to the same group.
+
+When enabled, vessel group numbers are written to the measurement CSV and optional vessel-group visualization images can be saved.
+
+---
+
+## OME-TIFF and special image formats
+
+OME-TIFF support can be enabled with:
+
+```python
+USE_OME_TIFF_READER = True
+OME_READ_INDEX = 0
+```
+
+The segmentation script includes controlled image normalization for non-uint8 images. This is useful for microscopy images stored as grayscale, uint16, float, multichannel TIFF, or OME-TIFF data.
+
+Available normalization modes:
+
+```python
+NORMALIZATION_MODE = "percentile"
+NORMALIZATION_MODE = "minmax"
+NORMALIZATION_MODE = "fixed_16bit"
+```
+
+The default is:
+
+```python
+NORMALIZATION_MODE = "percentile"
+```
+
+---
+
+## Installation
+
+Create a conda environment:
+
+```bash
+conda create -n AIAnatomyEnv python=3.10 -y
+conda activate AIAnatomyEnv
+```
+
+Install GPU-enabled PyTorch:
+
+```bash
+conda install -y -c pytorch -c nvidia pytorch torchvision pytorch-cuda=11.8
+```
+
+Install scientific and imaging dependencies:
+
+```bash
+conda install -y -c conda-forge numpy pandas scipy scikit-image matplotlib opencv pillow
+```
+
+Install pip-only dependencies:
+
+```bash
+python -m pip install ultralytics pyometiff roboflow
+```
+
+Optional Jupyter kernel:
+
+```bash
+conda install -y -c conda-forge ipykernel jupyterlab
+python -m ipykernel install --user --name AIAnatomyEnv --display-name "AIAnatomyEnv"
+```
+
+---
+
+## Main dependencies
+
+The scripts use:
+
+- Python
+- Ultralytics YOLO
+- PyTorch
+- NumPy
+- pandas
+- OpenCV
+- Pillow
+- SciPy
+- scikit-image
+- matplotlib
+- pyometiff
+- Roboflow
+
+---
+
+## Example end-to-end use
+
+```bash
+# 1. Crop raw images into YOLO-sized tiles
+python cropimages.py
+
+# 2. Train a YOLO segmentation model
+python YoloTrain.py
+
+# 3. Optional: upload trained weights to Roboflow
+python uploadYOLOtoRoboflow.py
+
+# 4. Segment full images and optionally measure anatomical features
+python YoloAntomicalSeg.py
+```
+
+---
+
+## Data and trained models
+
+A trained network example and accompanying training data are available on Zenodo.
+
+The software for image acquisition with the Gigapixel Woodbot can be found here:
+
+https://github.com/UGent-Woodlab/Gigapixel-Woodbot
+
+The trained YOLO model and training data can be found here:
+
+https://doi.org/10.5281/zenodo.14604996
+
+The increment core images can be found here:
+
+https://doi.org/10.5281/zenodo.14627909
+
+The disk images can be found here:
+
+https://doi.org/10.6019/S-BIAD1574
+
+When using the software, please also cite the relevant Zenodo DOI for the software release:
+
+- analysis software: https://doi.org/10.5281/zenodo.14637855
+- imaging software: https://doi.org/10.5281/zenodo.14637832
 
 ---
 
 ## Cite our work
 
-You can find the paper where the entire pipeline is described [here](https://doi.org/10.1186/s13007-025-01330-7), or cite our work with the following bibtex snippet:
+The full pipeline is described in:
+
+https://doi.org/10.1186/s13007-025-01330-7
+
+Please cite:
 
 ```tex
-\cite(VandenBulcke2025, software2025)
-
-﻿@Article{VandenBulcke2025,
-author={{Van den Bulcke}, Jan and Verschuren, Louis and De Blaere, Ruben and Vansuyt, Simon and Dekegeleer, Maxime and Kibleur, Pierre and Pieters, Olivier and De Mil, Tom and Hubau, Wannes and Beeckman, Hans and Van Acker, Joris and Wyffels, Francis},
-title={Enabling high-throughput quantitative wood anatomy through a dedicated pipeline},
-journal={Plant Methods},
-year={2025},
-month={Feb},
-day={04},
-volume={21},
-number={1},
-pages={11},
-issn={1746-4811},
-doi={10.1186/s13007-025-01330-7}
+@Article{VandenBulcke2025,
+  author={{Van den Bulcke}, Jan and Verschuren, Louis and De Blaere, Ruben and Vansuyt, Simon and Dekegeleer, Maxime and Kibleur, Pierre and Pieters, Olivier and De Mil, Tom and Hubau, Wannes and Beeckman, Hans and Van Acker, Joris and Wyffels, Francis},
+  title={Enabling high-throughput quantitative wood anatomy through a dedicated pipeline},
+  journal={Plant Methods},
+  year={2025},
+  month={Feb},
+  day={04},
+  volume={21},
+  number={1},
+  pages={11},
+  issn={1746-4811},
+  doi={10.1186/s13007-025-01330-7}
 }
 
 @software{software2025,
-  author       = {{Van den Bulcke}, Jan and Verschuren, Louis and Wyffels, Francis}, 
-  title        = {UGent-Woodlab/High-throughput-pipeline-yolov8},
-  month        = jan,
-  year         = 2025,
-  publisher    = {Zenodo},
-  doi          = {10.5281/zenodo.14637854}
+  author={{Van den Bulcke}, Jan and Verschuren, Louis and Wyffels, Francis},
+  title={UGent-Woodlab/High-throughput-pipeline-yolov8},
+  month={jan},
+  year={2025},
+  publisher={Zenodo},
+  doi={10.5281/zenodo.14637854}
 }
-
 ```
 
-The software for image acquisition with the Gigapixel Woodbot can be found [here](https://github.com/UGent-Woodlab/Gigapixel-Woodbot), the trained YOLOv8 model and training data can be found [here](https://doi.org/10.5281/zenodo.14604996), the increment core images can be found [here](https://doi.org/10.5281/zenodo.14627909) and the disk images [here](https://doi.org/10.6019/S-BIAD1574).
-
-When using any of the software, also cite the proper Zenodo DOI ([here for analysis](https://doi.org/10.5281/zenodo.14637855) and [here for imaging](https://doi.org/10.5281/zenodo.14637832)) related to the releases of the software.
-
 ---
 
-##  License
+## License
 
-This software is protected under the [GNU AGPLv3](https://choosealicense.com/licenses/agpl-3.0/) license. 
+This software is licensed under the GNU Affero General Public License v3.0.
 
----
+See the license text here:
+
+https://choosealicense.com/licenses/agpl-3.0/
