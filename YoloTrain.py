@@ -329,6 +329,8 @@ def print_run_summary():
 # =============================================================================
 
 def main():
+    os.chdir(PROJECT_ROOT)
+  
     validate_settings()
     configure_ultralytics_paths()
     set_reproducibility()
