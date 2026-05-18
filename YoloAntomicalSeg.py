@@ -87,9 +87,9 @@ from matplotlib import colormaps
 # -----------------------------
 # Input / output
 # -----------------------------
-INPUT_FOLDER = r"D:\Users\labo\Lverschuren\BlancaHoutskoolVaten\cropped"
-OUTPUT_ROOT  = r"D:\Users\labo\Lverschuren\BlancaHoutskoolVaten\croppedseg"
-MODEL_WEIGHTS = r"D:\Users\labo\Lverschuren\BlancaHoutskoolVaten\ModelV1YOLOV26\weights\best.pt"
+INPUT_FOLDER = r"D:\Users\labo\Lverschuren\William\Raw images"
+OUTPUT_ROOT  = r"D:\Users\labo\Lverschuren\William\Segmented"
+MODEL_WEIGHTS = r"D:\Users\labo\Lverschuren\William\ModelYOLOv11\weights\best.pt"
 
 
 
@@ -99,20 +99,18 @@ MODEL_WEIGHTS = r"D:\Users\labo\Lverschuren\BlancaHoutskoolVaten\ModelV1YOLOV26\
 # -----------------------------
 SUB_IMAGE_SIZE   = 640 # size of the moving window for YOLO segmentation; adjust based on your model, 640 default
 OVERLAP_PERCENT  = 0.5 # fraction of tile size to overlap 
-IOU_NMS          = 0.3 # IOU threshold for NMS within each tile; # Higher = allow more overlapping detections to remain. # Lower = suppress overlapping detections more aggressively. 
+IOU_NMS          = 0.5 # IOU threshold for NMS within each tile; # Higher = allow more overlapping detections to remain. # Lower = suppress overlapping detections more aggressively. 
 PRINT_EVERY_TILE = 25 # how often to print progress during tiling
 
 # Save optional overlay images (can be large)
 SAVE_OVERLAY_IMAGES = True
 
-# Resolve overlaps between features (recommended)
+# Resolve overlaps between features (recommended). Higher priority wins; lower priority loses pixels where higher exists
 RESOLVE_OVERLAPS = True
-
-# Higher priority wins; lower priority loses pixels where higher exists.
 FEATURE_PRIORITY = ["fibers", "vessels", "rays", "parenchyma"]
 
-# Optional cell wall / fiber-wall mask output
-OUTPUT_CELLWALL_MASK = True
+# Optional cell wall / fiber-wall mask output (the leftover area after subtracting all segmented features). This can be useful for some analyses, but it is not a direct model output and may contain errors.
+OUTPUT_CELLWALL_MASK = False
 
 # Feature configuration 
 # - enabled: segment it or not
@@ -123,7 +121,7 @@ FEATURES = {
     "vessels": {
         "enabled": True,
         "class_id": 0,
-        "conf": 0.5,
+        "conf": 0.2,
         "large_fov": False,
     },
     "rays": {
@@ -152,12 +150,12 @@ FEATURES = {
 
 
 # -----------------------------
-# Measurement stage: YOLO-border object reconstruction (optional)
+# Measurement: measure the segmented features (optional)
 # -----------------------------
-RUN_MEASUREMENT_STAGE = False
+RUN_MEASUREMENT_STAGE = True
 
 # Pixel size: width of one pixel (meters)
-PIXEL_SIZE_M = 1e-6
+PIXEL_SIZE_M = 2.25e-6
 
 # Which features to measure using YOLO-border instance reconstruction?
 MEASURE_FEATURES = {
@@ -178,7 +176,15 @@ MEAS_PARAMS = {
 }
 
 # Save the accumulated full-image border masks used for object measurement.
-SAVE_INSTANCE_BORDER_MASKS = False
+SAVE_INSTANCE_BORDER_MASKS = True
+
+# Save an RGB image where each measured object has a random color.
+SAVE_MEASURED_OBJECT_IMAGES = True
+
+# Remove perfectly horizontal or vertical border-mask sections longer than this
+# many pixels before using the border mask for object segmentation.
+REMOVE_LONG_STRAIGHT_BORDER_SECTIONS = True
+LONG_STRAIGHT_BORDER_SECTION_MAX_PX = 200
 
 # Fill holes inside final reconstructed objects before measuring them.
 FILL_HOLES_BEFORE_MEASUREMENT = {
@@ -188,13 +194,24 @@ FILL_HOLES_BEFORE_MEASUREMENT = {
     "parenchyma": True,
 }
 
-# Vessel grouping: Vessels are assigned to the same group when the closest points of their final measured masks are at most this many micrometers apart.
+
+
+
+
+# -----------------------------
+# Vessel grouping: Vessels are assigned to groups (optional)
+# -----------------------------
+CALCULATE_VESSEL_GROUPS = True
+
+# Vessels are assigned to the same group when the closest points of their final measured masks are at most this many micrometers apart.
 # This value should be the 95th percentile of the minimum edge-to-edge distance between distinct vessels in your dataset, plus a small margin of 1 or 2 pixels for segmentation error. 
-CALCULATE_VESSEL_GROUPS = False
-VESSEL_GROUP_DISTANCE_UM = 15.0     # in micrometers
+VESSEL_GROUP_DISTANCE_UM = 25.0     # in micrometers
 
 # Save an RGB image where each vessel group has a random color.
 SAVE_VESSEL_GROUP_IMAGES = True
+
+
+
 
 
 
@@ -265,14 +282,14 @@ def ensure_dirs():
         # Only create measurement folders for features that are both:
         # 1) segmented
         # 2) selected for measurement
-        if RUN_MEASUREMENT_STAGE and MEASURE_FEATURES.get(feat, False):
+        if RUN_MEASUREMENT_STAGE and SAVE_MEASURED_OBJECT_IMAGES and MEASURE_FEATURES.get(feat, False):
             os.makedirs(
                 os.path.join(OUTPUT_ROOT, "measurements", f"{feat}_segmented"),
                 exist_ok=True
             )
 
-    # Vessel-group images are saved separately from the area-colored measurement
-    # visuals because they encode group identity, not vessel size.
+    # Vessel-group images are saved separately from the measured-object
+    # visuals because they encode group identity, not object identity.
     if RUN_MEASUREMENT_STAGE and CALCULATE_VESSEL_GROUPS and SAVE_VESSEL_GROUP_IMAGES:
         os.makedirs(os.path.join(OUTPUT_ROOT, "measurements", "vessel_groups"), exist_ok=True)
 
@@ -656,31 +673,44 @@ def yolo_predict_class_mask_and_border(yolo_model: YOLO,
 
 
 
-def apply_tile_mask_to_full(full_mask: np.ndarray,
-                            tile_mask: np.ndarray,
-                            x: int, y: int,
-                            tile_size: int,
-                            img_w: int, img_h: int,
-                            overlap_percent: float):
+
+def apply_tile_outputs_to_full(full_mask: np.ndarray,
+                               full_border_mask: np.ndarray,
+                               assigned_pixels: np.ndarray,
+                               tile_mask: np.ndarray,
+                               tile_border: np.ndarray,
+                               x: int, y: int,
+                               tile_size: int,
+                               img_w: int, img_h: int,
+                               overlap_percent: float):
     """
-    Merge a tile mask into the full mask.
-    - Crop tile to ROI if we are on the image boundary
-    - Zero out detections outside the tile’s valid region
-    - Merge using max() so multiple tiles accumulate safely
+    Merge one tile into the full masks with strict tile ownership.
+
+    Each full-image pixel is written by only one tile. The filled mask and the
+    border mask use the same write region, so object-support pixels and
+    object-border pixels come from the same YOLO view of that image location.
     """
     roi_h = min(tile_size, img_h - y)
     roi_w = min(tile_size, img_w - x)
 
     tile_mask = tile_mask[:roi_h, :roi_w]
-
+    tile_border = tile_border[:roi_h, :roi_w]
     valid = make_valid_region_mask(tile_size, overlap_percent, x, y, img_w, img_h)
     valid = valid[:roi_h, :roi_w]
 
-    tile_mask = tile_mask.copy()
-    tile_mask[~valid] = 0
+    assigned_roi = assigned_pixels[y:y + roi_h, x:x + roi_w]
+    write = valid & (~assigned_roi)
 
-    roi = full_mask[y:y + roi_h, x:x + roi_w]
-    full_mask[y:y + roi_h, x:x + roi_w] = np.maximum(roi, tile_mask)
+    mask_roi = full_mask[y:y + roi_h, x:x + roi_w]
+    border_roi = full_border_mask[y:y + roi_h, x:x + roi_w]
+
+    mask_roi[write] = tile_mask[write]
+    border_roi[write] = tile_border[write]
+    assigned_roi[write] = True
+
+    full_mask[y:y + roi_h, x:x + roi_w] = mask_roi
+    full_border_mask[y:y + roi_h, x:x + roi_w] = border_roi
+    assigned_pixels[y:y + roi_h, x:x + roi_w] = assigned_roi
 
 
 
@@ -698,24 +728,24 @@ def segment_feature_full_image(img_rgb: np.ndarray,
     This function returns two full-image masks:
 
     1) full_mask
-       The normal filled binary segmentation mask. This mask uses all available
-       segmentation evidence: the standard-FOV pass and, if enabled, the
-       large-FOV pass.
+       The normal filled binary segmentation mask.
 
     2) full_border_mask
        The object-border mask used later to split the merged full mask into
-       individual objects for measurement. This mask uses the largest available
-       field of view only:
-       - if large_fov=True, use only borders from the large-FOV pass
-       - if large_fov=False, use borders from the standard-FOV pass
+       individual objects for measurement.
 
-    Why are borders treated differently from filled masks?
-    -----------------------------------------------------
-    For large objects, a small tile may only show part of the object. YOLO can
-    then draw a border where the object continues outside the field of view.
-    That false border can split one real vessel into two measured objects.
-    Using borders from the largest available FOV reduces those internal false
-    borders while still allowing the filled mask to benefit from all passes.
+    Tile ownership policy
+    ---------------------
+    Each full-image pixel is written by only one tile within the selected field
+    of view. The filled mask and border mask are written from the same tile for
+    each pixel. This prevents overlapping tiles from both contributing slightly
+    different YOLO edges to the final masks.
+
+    Field-of-view policy
+    --------------------
+    If large_fov=True, the final filled mask and final border mask both come
+    from the large-FOV pass. If large_fov=False, both come from the standard-FOV
+    pass. This keeps the filled mask and measurement border mask synchronized.
 
     Returns
     -------
@@ -724,71 +754,23 @@ def segment_feature_full_image(img_rgb: np.ndarray,
     """
     img_h, img_w = img_rgb.shape[:2]
 
-    # Filled class mask: accumulate all passes.
-    full_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+    def run_tiled_pass(tile_size: int, pass_label: str):
+        pass_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+        pass_border_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+        assigned_pixels = np.zeros((img_h, img_w), dtype=bool)
 
-    # Border masks: keep per-FOV versions and choose the safest one at the end.
-    small_fov_border_mask = np.zeros((img_h, img_w), dtype=np.uint8)
-    large_fov_border_mask = np.zeros((img_h, img_w), dtype=np.uint8)
+        overlap_px = int(tile_size * OVERLAP_PERCENT)
+        stride = max(1, tile_size - overlap_px)
 
-    # -----------------------------
-    # Pass 1: standard-FOV tiles
-    # -----------------------------
-    tile = SUB_IMAGE_SIZE
-    overlap_px = int(tile * OVERLAP_PERCENT)
-    stride = max(1, tile - overlap_px)
+        xs = compute_tile_starts(img_w, tile_size, stride)
+        ys = compute_tile_starts(img_h, tile_size, stride)
 
-    xs = compute_tile_starts(img_w, tile, stride)
-    ys = compute_tile_starts(img_h, tile, stride)
+        total_tiles = len(xs) * len(ys)
+        done = 0
 
-    total_tiles = len(xs) * len(ys)
-    done = 0
-
-    for y in ys:
-        for x in xs:
-            box = (x, y, x + tile, y + tile)
-            tile_rgb = crop_rgb_uint8(img_rgb, box)
-
-            tile_mask, tile_border = yolo_predict_class_mask_and_border(
-                yolo_model=yolo_model,
-                tile_rgb_np=tile_rgb,
-                class_id=class_id,
-                conf=conf,
-                iou=IOU_NMS,
-            )
-
-            # Filled masks always use all available FOVs.
-            apply_tile_mask_to_full(full_mask, tile_mask, x, y, tile, img_w, img_h, OVERLAP_PERCENT)
-
-            # Standard-FOV borders are kept separately. They are used only when this
-            # feature does not have a large-FOV pass.
-            apply_tile_mask_to_full(small_fov_border_mask, tile_border, x, y, tile, img_w, img_h, OVERLAP_PERCENT)
-
-            done += 1
-            if done % PRINT_EVERY_TILE == 0:
-                sys.stdout.write(f"\r  {feature_name}: tiles {done}/{total_tiles}")
-                sys.stdout.flush()
-
-    sys.stdout.write(f"\r  {feature_name}: tiles {total_tiles}/{total_tiles}\n")
-    sys.stdout.flush()
-
-    # -----------------------------
-    # Pass 2: large-FOV tiles
-    # -----------------------------
-    if large_fov:
-        tile2 = SUB_IMAGE_SIZE * 2
-        overlap_px2 = int(tile2 * OVERLAP_PERCENT)
-        stride2 = max(1, tile2 - overlap_px2)
-
-        xs2 = compute_tile_starts(img_w, tile2, stride2)
-        ys2 = compute_tile_starts(img_h, tile2, stride2)
-
-        total_tiles2 = len(xs2) * len(ys2)
-        done2 = 0
-
-        for y in ys2:
-            for x in xs2:
-                box = (x, y, x + tile2, y + tile2)
+        for yy in ys:
+            for xx in xs:
+                box = (xx, yy, xx + tile_size, yy + tile_size)
                 tile_rgb = crop_rgb_uint8(img_rgb, box)
 
                 tile_mask, tile_border = yolo_predict_class_mask_and_border(
@@ -799,35 +781,49 @@ def segment_feature_full_image(img_rgb: np.ndarray,
                     iou=IOU_NMS,
                 )
 
-                # Filled masks still benefit from the large-FOV pass.
-                apply_tile_mask_to_full(full_mask, tile_mask, x, y, tile2, img_w, img_h, OVERLAP_PERCENT)
+                apply_tile_outputs_to_full(
+                    full_mask=pass_mask,
+                    full_border_mask=pass_border_mask,
+                    assigned_pixels=assigned_pixels,
+                    tile_mask=tile_mask,
+                    tile_border=tile_border,
+                    x=xx,
+                    y=yy,
+                    tile_size=tile_size,
+                    img_w=img_w,
+                    img_h=img_h,
+                    overlap_percent=OVERLAP_PERCENT,
+                )
 
-                # Object borders for large-FOV features should come from this pass.
-                apply_tile_mask_to_full(large_fov_border_mask, tile_border, x, y, tile2, img_w, img_h, OVERLAP_PERCENT)
-
-                done2 += 1
-                if done2 % PRINT_EVERY_TILE == 0:
-                    sys.stdout.write(f"\r  {feature_name} (large FOV): tiles {done2}/{total_tiles2}")
+                done += 1
+                if done % PRINT_EVERY_TILE == 0:
+                    sys.stdout.write(f"\r  {pass_label}: tiles {done}/{total_tiles}")
                     sys.stdout.flush()
 
-        sys.stdout.write(f"\r  {feature_name} (large FOV): tiles {total_tiles2}/{total_tiles2}\n")
+        sys.stdout.write(f"\r  {pass_label}: tiles {total_tiles}/{total_tiles}\n")
         sys.stdout.flush()
 
+        return pass_mask, pass_border_mask
+
     # -----------------------------
-    # Choose border source for measurement
+    # Pass 1: standard-FOV tiles
     # -----------------------------
-    # Always use the largest available FOV for borders:
-    # - features with large_fov=True use only the large-FOV border mask
-    # - features with large_fov=False use the standard-FOV border mask
-    # There is no fallback to standard-FOV borders for large-FOV features,
-    # because that can reintroduce false internal borders in large objects.
+    standard_mask, standard_border_mask = run_tiled_pass(
+        tile_size=SUB_IMAGE_SIZE,
+        pass_label=feature_name,
+    )
+
+    # -----------------------------
+    # Pass 2: large-FOV tiles
+    # -----------------------------
     if large_fov:
-        full_border_mask = large_fov_border_mask
-    else:
-        full_border_mask = small_fov_border_mask
+        large_mask, large_border_mask = run_tiled_pass(
+            tile_size=SUB_IMAGE_SIZE * 2,
+            pass_label=f"{feature_name} (large FOV)",
+        )
+        return large_mask, large_border_mask
 
-
-    return full_mask, full_border_mask
+    return standard_mask, standard_border_mask
 
 
 # =============================================================================
@@ -946,6 +942,39 @@ def boundary_and_edge_stats(region_mask_crop, bbox, image_shape):
     return num_total, num_edge, num_inside, perimeter_ratio, chosen_edge, edge_rc, non_edge_rc
 
 
+def remove_long_straight_border_sections(border_mask_255: np.ndarray) -> np.ndarray:
+    """Remove long perfectly horizontal or vertical runs from a border mask."""
+    if not REMOVE_LONG_STRAIGHT_BORDER_SECTIONS:
+        return border_mask_255
+
+    max_len = int(LONG_STRAIGHT_BORDER_SECTION_MAX_PX)
+    if max_len < 1:
+        return border_mask_255
+
+    border = np.asarray(border_mask_255) > 0
+    out = border.copy()
+
+    # Horizontal runs.
+    for r in range(border.shape[0]):
+        row = border[r, :]
+        padded = np.r_[False, row, False]
+        changes = np.flatnonzero(padded[1:] != padded[:-1])
+        for start, end in zip(changes[::2], changes[1::2]):
+            if end - start > max_len:
+                out[r, start:end] = False
+
+    # Vertical runs.
+    for c in range(border.shape[1]):
+        col = border[:, c]
+        padded = np.r_[False, col, False]
+        changes = np.flatnonzero(padded[1:] != padded[:-1])
+        for start, end in zip(changes[::2], changes[1::2]):
+            if end - start > max_len:
+                out[start:end, c] = False
+
+    return (out.astype(np.uint8) * 255)
+
+
 def label_instances_from_yolo_borders(binary_mask_255: np.ndarray,
                                      border_mask_255: np.ndarray):
     """
@@ -978,6 +1007,7 @@ def label_instances_from_yolo_borders(binary_mask_255: np.ndarray,
         Labeled instance image with 0 as background.
     """
     mask = (binary_mask_255 > 0)
+    border_mask_255 = remove_long_straight_border_sections(border_mask_255)
     border = (border_mask_255 > 0) & mask
 
     if not np.any(mask):
@@ -1227,6 +1257,23 @@ def make_vessel_group_rgb(labels: np.ndarray,
     return out
 
 
+def make_measured_objects_rgb(labels: np.ndarray,
+                              measured_instance_labels: list):
+    """Create an RGB visualization in which each measured object has a random color."""
+    out = np.zeros((*labels.shape, 3), dtype=np.uint8)
+
+    if not measured_instance_labels:
+        return out
+
+    rng = np.random.default_rng()
+
+    for instance_label in measured_instance_labels:
+        color = rng.integers(40, 256, size=3, dtype=np.uint8)
+        out[labels == int(instance_label)] = color
+
+    return out
+
+
 def measure_from_instance_labels(labels: np.ndarray,
                                  feature_name: str,
                                  image_id: str,
@@ -1252,7 +1299,7 @@ def measure_from_instance_labels(labels: np.ndarray,
     Returns
     -------
     (rgb, rows, vessel_group_rgb)
-        rgb is the existing area-colored measurement visualization. rows is the
+        rgb is the existing measurement visualization. rows is the
         list of measurement dictionaries. vessel_group_rgb is an RGB group image
         for vessels when grouping is enabled; otherwise it is None.
     """
@@ -1387,19 +1434,7 @@ def measure_from_instance_labels(labels: np.ndarray,
         for row in rows:
             row["vessel_group"] = ""
 
-    stretched = np.sqrt(area_map)
-    nonzero = stretched > 0
-
-    if np.any(nonzero):
-        vmin = np.percentile(stretched[nonzero], 1)
-        vmax = np.percentile(stretched[nonzero], 95)
-    else:
-        vmin, vmax = 0.0, 1.0
-
-    normalized = np.clip((stretched - vmin) / (vmax - vmin + 1e-9), 0, 1)
-    cmap = colormaps.get_cmap("turbo")
-    rgb = (cmap(normalized)[:, :, :3] * 255).astype(np.uint8)
-    rgb[area_map == 0] = [0, 0, 0]
+    rgb = make_measured_objects_rgb(labels, measured_instance_labels)
 
     return rgb, rows, vessel_group_rgb
 
@@ -1506,8 +1541,11 @@ def save_run_config():
         f.write(f"MEAS_PARAMS = {MEAS_PARAMS}\n")
         f.write(f"PIXEL_SIZE_M = {PIXEL_SIZE_M}\n")
         f.write(f"SAVE_INSTANCE_BORDER_MASKS = {SAVE_INSTANCE_BORDER_MASKS}\n")
+        f.write(f"SAVE_MEASURED_OBJECT_IMAGES = {SAVE_MEASURED_OBJECT_IMAGES}\n")
+        f.write(f"REMOVE_LONG_STRAIGHT_BORDER_SECTIONS = {REMOVE_LONG_STRAIGHT_BORDER_SECTIONS}\n")
+        f.write(f"LONG_STRAIGHT_BORDER_SECTION_MAX_PX = {LONG_STRAIGHT_BORDER_SECTION_MAX_PX}\n")
         f.write(f"FILL_HOLES_BEFORE_MEASUREMENT = {FILL_HOLES_BEFORE_MEASUREMENT}\n")
-        f.write("INSTANCE_BORDER_POLICY = one-pixel borders restored before measurement; largest available FOV; no fallback\n")
+        f.write("INSTANCE_BORDER_POLICY = one-pixel borders restored before measurement; tile-exclusive ownership\n")
 
         f.write("\nVESSEL GROUPING:\n")
         f.write(f"CALCULATE_VESSEL_GROUPS = {CALCULATE_VESSEL_GROUPS}\n")
@@ -1646,11 +1684,12 @@ def main():
                 per_feature_rows[feat_name].extend(rows)
 
                 # Save measurement visualization
-                out_seg = os.path.join(
-                    OUTPUT_ROOT, "measurements", f"{feat_name}_segmented",
-                    f"{image_id}__{feat_name}_segmented.tif"
-                )
-                imsave(out_seg, seg_rgb)
+                if SAVE_MEASURED_OBJECT_IMAGES:
+                    out_seg = os.path.join(
+                        OUTPUT_ROOT, "measurements", f"{feat_name}_segmented",
+                        f"{image_id}__{feat_name}_segmented.tif"
+                    )
+                    imsave(out_seg, seg_rgb)
 
                 # Save vessel-group visualization when available. The output is
                 # an RGB image with one random color per vessel group.
