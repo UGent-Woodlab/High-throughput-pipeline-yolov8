@@ -45,7 +45,6 @@ The pipeline supports:
 
 - cropping large images into YOLO-sized training tiles;
 - training an Ultralytics YOLO segmentation model;
-- optionally uploading trained weights to Roboflow;
 - tiled full-image segmentation using a sliding-window approach;
 - exporting binary masks for anatomical features such as vessels, rays, fibers, and parenchyma;
 - optional object-level measurements;
@@ -104,25 +103,7 @@ Main features:
 
 ---
 
-### 3. Upload trained weights to Roboflow
-
-Script:
-
-```text
-uploadYOLOtoRoboflow.py
-```
-
-This optional script uploads trained YOLO weights to a Roboflow project version.
-
-Main features:
-
-- reads the Roboflow API key from an environment variable;
-- validates that the selected `best.pt` or `last.pt` file exists;
-- uploads the model to a selected Roboflow workspace, project, and version.
-
----
-
-### 4. Segment anatomical features and export masks
+### 3. Segment anatomical features and export masks
 
 Script:
 
@@ -177,7 +158,7 @@ conda install -y -c conda-forge numpy pandas scipy scikit-image matplotlib openc
 Install pip-only dependencies:
 
 ```bash
-python -m pip install ultralytics pyometiff roboflow
+python -m pip install ultralytics pyometiff
 ```
 
 Optional Jupyter kernel:
@@ -204,7 +185,6 @@ The scripts use:
 - scikit-image
 - matplotlib
 - pyometiff
-- Roboflow
 
 ---
 
