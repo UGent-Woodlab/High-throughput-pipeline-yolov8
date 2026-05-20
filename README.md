@@ -136,6 +136,13 @@ Main features:
 
 ## Installation
 
+Use the environment.yml file: 
+
+```bash
+conda create --file environment.yml
+```
+
+Or use the following steps to build it from scratch: 
 Create a conda environment:
 
 ```bash
@@ -167,6 +174,8 @@ Optional Jupyter kernel:
 conda install -y -c conda-forge ipykernel jupyterlab
 python -m ipykernel install --user --name AIAnatomyEnv --display-name "AIAnatomyEnv"
 ```
+
+
 
 ---
 
