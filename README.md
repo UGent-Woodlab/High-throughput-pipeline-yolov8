@@ -134,6 +134,21 @@ Main features:
 
 ---
 
+### 4. Assign features to rings and calculate anatomical parameters per ring
+
+Script:
+
+```text
+QWAexample.Rmd
+```
+
+An example R script that uses tree ring indications made in RingIndicator (https://github.com/UGent-Woodlab/XCT-toolchain-compiled) to assign anatomical features to individual rings. Requires XCT.read (https://github.com/UGent-Woodlab/XCT.read-R-function). 
+
+---
+
+
+
+
 ## Installation
 
 Use the environment.yml file: 
