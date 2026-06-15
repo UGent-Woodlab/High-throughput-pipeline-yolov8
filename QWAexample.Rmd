@@ -1,0 +1,368 @@
+---
+title: "QWA"
+author: "Louis Verschuren"
+date: "2026-06-15"
+output: 
+     html_document:
+          theme: yeti
+          code_folding: hide
+          toc: true
+          toc_depth: 3
+          toc_float:
+            collapsed: false
+          number_sections: true
+---
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE, 
+  warning = FALSE,
+  message = FALSE,
+  out.width = '100%',
+  dpi=300
+)
+```
+
+```{r setup, include=FALSE}
+remove(list = ls())
+
+#### load necessary (and usefull) packages ####
+
+library("tidyverse")
+library("dplyr")
+library("ggplot2")
+library("readxl")
+library("writexl")
+library("data.table")
+
+
+
+
+# XCT.read setup
+source("XCT.Read.R") # load XCT.read function (download here: https://github.com/UGent-Woodlab/XCT.read-R-function)
+
+
+
+```
+
+
+
+
+# Settings
+```{r}
+overruleResolution = TRUE
+resolution = 0.2 # pixel resolution in microns
+area <- c(0.75, 1) # area of the ring to calculate fractions over (0-1)
+```
+
+
+
+
+
+# load QWA data
+```{r}
+# Load QWA data profiles and calculate mean densities
+Vesseldata <- XCT.read("segmentations/Vessels", output = "ringwidth_density", densityType = "fraction", area = area, fun = "mean", overruleResolution = overruleResolution, resolution = resolution) %>% rename(Vessels = Density) %>% select(Sample, Year, Vessels, RW)
+Raydata <- XCT.read("segmentations/Rays", output = "ringwidth_density", densityType = "fraction", area = area, fun = "mean", overruleResolution = overruleResolution, resolution = resolution) %>% rename(Rays = Density) %>% select(Sample, Year, Rays)
+Fiberdata <- XCT.read("segmentations/Fibers", output = "ringwidth_density", densityType = "fraction", area = area, fun = "mean", overruleResolution = overruleResolution, resolution = resolution) %>% rename(FiberLumen = Density) %>% select(Sample, Year, FiberLumen)
+FiberWalldata <- XCT.read("segmentations/FiberWalls", output = "ringwidth_density", densityType = "fraction", area = area, fun = "mean", overruleResolution = overruleResolution, resolution = resolution) %>% rename(FiberWalls = Density) %>% select(Sample, Year, FiberWalls)
+
+# Load vessel conductivity data
+Conductivitydata <- read.csv("segmentations/Hydraulic conductivity/all_vessel_properties.csv", header = TRUE, sep = ",", dec = ".") %>% rename(Sample = image)
+
+# path to ring indication data vessel
+path <- "segmentations/Vessels"
+```
+
+
+
+# load hydraulic conductivity data and ring data, assign rings to vessels
+```{r}
+
+# Load all ringwidth.txt files
+files <- list.files(path, pattern = "_ringwidth.txt", full.names = TRUE)
+
+# resolution in mm
+resolution_mm = resolution*1000 
+
+# Function to read each file, add the file name, and combine all into one data frame
+rings <- lapply(files, function(file) {
+  # Extract the file name before "_density_corr"
+  file_name <- sub("_ringwidth.txt$", "", basename(file))
+  
+  # Read the file, treat "NaN" as NA, and specify numeric columns
+  data <- read_delim(file, delim = ", ", 
+                     col_names = c("width", "Year", "pixelsize", "Felldate", "MissingringsBefore", "BrokenRingType"),
+                     na = "NaN", show_col_types = FALSE)  
+  data <- data %>% mutate(Sample = file_name, row_number = row_number()) # Add the file name as a new column
+  data <- data %>% filter(BrokenRingType != 2) # remove type 2 broken rings rows
+  data <- data %>% group_by(Year) %>% mutate(width = max(width)) %>% ungroup() # set ringwidth to the max ringwidth: relevant for ring a type 1 broken ring present
+  data <- data %>% filter(BrokenRingType != 1) # remove type 1 broken rings rows
+  if (overruleResolution) {data$pixelsize <- resolution_mm} # set the resolution to the value in the resolution parameter
+  data$RW <- data$width * data$pixelsize /1000 # calculate ring width in mm
+  return(data)
+}) %>% bind_rows() # Combine all data frames into one
+
+
+# Load all _zpos files
+files <- list.files(path, pattern = "_zpos.txt", full.names = TRUE)
+
+# Function to read each file, add the file name, and combine all into one data frame
+zpos_corr <- lapply(files, function(file) {
+  # Extract the file name before "_density_corr"
+  file_name <- sub("_zpos.txt$", "", basename(file))
+  
+  # Read the file, treat "NaN" as NA
+  data <- read_delim(file, delim = "\n", col_names = "xpos", na = "NaN",  show_col_types = FALSE)
+  
+  # Add the file name as a new column
+  data <- data %>% mutate(Sample = file_name, row_number = row_number()-1)
+  
+  return(data)
+}) %>% bind_rows() # Combine all data frames into one
+
+
+# Load all _ring_and_fibre.txt files
+files <- list.files(path, pattern = "_ring_and_fibre.txt", full.names = TRUE)
+
+# Function to read each file, add the file name, and combine all into one data frame
+ring_and_fibre <- lapply(files, function(file) {
+  # Extract the file name before "_density_corr"
+  file_name <- sub("_ring_and_fibre.txt$", "", basename(file))
+  
+  # Read the file, treat "NaN" as NA
+  data <- read_delim(file, delim = ", ", col_names = c("xposEndRing", "angle", "angle2"), na = "NaN",  show_col_types = FALSE) 
+  data$angle2 <- NULL
+  
+  # Add the file name as a new column
+  data <- data %>% mutate(Sample = file_name, row_number = row_number()-1)
+  
+  return(data)
+}) %>% bind_rows() # Combine all data frames into one
+
+
+# Merge rings and zpos_corr by Sample and row_number to add start and end columns
+rings <- rings %>%
+  left_join(zpos_corr %>% 
+              mutate(row_number = row_number + 1) %>% # Shift row_number for "start"
+              rename(start = xpos), 
+            by = c("Sample", "row_number")) %>%
+  left_join(zpos_corr %>% rename(end = xpos), by = c("Sample", "row_number")) %>%
+  left_join(ring_and_fibre %>% rename(angleEndRing = angle), by = c("Sample", "row_number"))
+rings$start <- rings$start + 1 # first pixel is the pixel after the end of the last one, otherwise this pixel is accounted twice
+rings <- rings %>% na.omit()   # remove NAs
+ringsbackup <- rings
+
+# remove duplicate rings
+rings <- rings %>%
+  group_by(Sample, Year) %>%
+  slice_max((end - start), with_ties = FALSE) %>%
+  ungroup()
+
+
+
+# fast method to find the angle of the closest ring
+# Convert to data.tables
+data_dt <- as.data.table(Conductivitydata)
+rings_dt <- as.data.table(rings)
+# Create ID for later reordering
+data_dt[, id := .I]
+# Create midpoint if needed (or use 'end')
+rings_dt[, match_pos := end]  # or midpoint: (start + end)/2
+# Sort both by Sample and match_pos
+setkey(rings_dt, Sample, match_pos)
+setkey(data_dt, Sample, centroid_x_px)
+# Perform rolling join
+result <- rings_dt[data_dt, on = .(Sample, match_pos = centroid_x_px), roll = "nearest"]
+# Restore original row order
+setorder(result, id)
+# Assign back
+Conductivitydata$angle <- result$angleEndRing
+
+
+
+
+
+
+# now each vessel need to be projected to a new x position in the middle line of the sample 
+Conductivitydata$Xproj <- Conductivitydata$centroid_x_px + tan(Conductivitydata$angle)*((Conductivitydata$image_height_px/2)-Conductivitydata$centroid_y_px)
+
+
+
+
+
+
+
+
+# Plotting the projection of vessels for a specific sample to check the transformation
+df_sample <- Conductivitydata %>% filter(Sample == "S+_22_B")
+
+# # small section of that sample
+# df_sample <- df_sample %>% filter(centroid_x_px > 2000 & centroid_x_px < 7000) # adjust the range as needed
+
+# Calculate middle y once
+middle_y <- unique(df_sample$image_height_px) / 2
+
+# plot
+testplot <- ggplot(df_sample, aes()) + 
+  geom_segment(aes(x = centroid_x_px, y = centroid_y_px, 
+                   xend = Xproj, yend = middle_y),
+               arrow = arrow(length = unit(0.2, "cm")), color = "blue", alpha = 0.3) +
+  
+  geom_point(aes(x = centroid_x_px, y = centroid_y_px, size = area_px2), 
+             color = "red", alpha = 0.5) +  # original points sized by area_m2
+  
+  geom_point(aes(x = Xproj, y = middle_y, size = area_px2), 
+             color = "green", alpha = 0.3) + # projected points sized by area_m2
+  
+  scale_size_continuous(range = c(1, 6)) +  # adjust dot size range as needed
+  
+  labs(title = paste("Projection of vessels - Sample:L-1008-1-B"),
+       x = "X position (pixels)",
+       y = "Y position (pixels)",
+       size = "Area (px²)") +
+  theme_minimal()
+
+testplot
+
+
+
+
+
+
+
+
+
+
+# assign each vessel to a ring using start and end in rings and Xproj
+# Convert to data.tables
+data_dt <- as.data.table(Conductivitydata)
+rings_dt <- as.data.table(rings)
+
+# Set keys for join by Sample, and sort rings by start
+setkey(rings_dt, Sample, start, end)
+setkey(data_dt, Sample, Xproj)
+
+# Perform a non-equi join: find for each vessel the ring where start <= Xproj <= end
+assigned <- rings_dt[data_dt, 
+                    on = .(Sample, start < Xproj, end >= Xproj),
+                    nomatch = 0,  # drop vessels that don't match any ring
+                    allow.cartesian = TRUE]
+
+Conductivitydata <- data.frame(assigned) %>% select(Sample, Year, end, area_px2, d4_px4, image_height_px) %>% rename(Xproj = end) # keep only relevant columns
+rings <- rings %>% select(Sample, Year, start, end) # keep only relevant columns
+Conductivitydata <- full_join(Conductivitydata, rings, by = c("Sample", "Year")) # join the two dataframes
+
+
+
+
+
+```
+
+
+
+
+# merge and export
+```{r}
+# merge QWA data
+Data <- full_join(Raydata, Vesseldata, by = c("Sample", "Year"))
+Data <- full_join(Data, Fiberdata, by = c("Sample", "Year"))
+Data <- full_join(Data, FiberWalldata, by = c("Sample", "Year"))
+
+
+# convert to fraction
+Data$total <- Data$Vessels + Data$Rays + Data$FiberLumen + Data$FiberWalls
+Data$Vessels <- Data$Vessels / Data$total
+Data$Rays <- Data$Rays / Data$total
+Data$FiberLumen <- Data$FiberLumen / Data$total
+Data$FiberWalls <- Data$FiberWalls / Data$total
+Data$total <- NULL
+
+
+
+# calculate corrected area fractions (excluding rays)
+Data$VesselsCorrectedNoRays <- Data$Vessels/(1-Data$Rays)
+Data$FiberWallsCorrectedNoRays <- Data$FiberWalls/(1-Data$Rays)
+Data$FiberLumenCorrectedNoRays <- Data$FiberLumen/(1-Data$Rays)
+
+
+# calculate anatomical fiber density
+Data$FiberDensity <- Data$FiberWalls/(Data$FiberWalls + Data$FiberLumen) # (is actualy the same as fiber wall fraction)
+
+# calculate anatomical density overall
+Data$AnatomicalDensity <- Data$FiberWalls/(Data$FiberWalls + Data$FiberLumen + Data$Vessels)
+
+
+
+
+
+
+
+
+
+
+
+# merge conductivity data
+Conductivitydata <- full_join(Data, Conductivitydata, by = c("Sample", "Year"))
+
+
+# calculate ringwidth in m for conductivity calculations (temporary, will be deleted later)
+Conductivitydata$RWtemp_m <- (Conductivitydata$end - Conductivitydata$start) * resolution/1000000 # in m
+
+# calculate the area of the needed fraction the ring, substract the area of the rays
+Conductivitydata$ringSectionArea_m2 <- Conductivitydata$RWtemp_m * (max(area)-min(area)) * (Conductivitydata$image_height_px * resolution/1000000)  * (1-Conductivitydata$Rays) # in m²
+
+# calculate the relative location of a vessel within the ring
+Conductivitydata$relPos <- (Conductivitydata$Xproj - Conductivitydata$start) / (Conductivitydata$end - Conductivitydata$start) # relative position of the vessel in the ring
+
+
+# constants
+viscosityWater <- 0.001
+
+# calculate hydraulic conductivity of the needed fraction the ring
+Conductivitydata <- Conductivitydata %>% 
+  filter(relPos > min(area) & relPos <= max(area)) %>% # keep only the needed fraction the ring
+  group_by(Sample, Year) %>%
+  summarise(
+    SumD4_m4 = sum(d4_px4)*((resolution/1000000)^4), # sum of the D4_px4 in m4 values of all vessels for each ring in each sample
+    ringSectionArea_m2 = mean(ringSectionArea_m2),  # assuming this is consistent per ring
+    .groups = "drop"
+  ) %>%
+  mutate(
+    Ks = ((pi) / (128 * viscosityWater)) * SumD4_m4 / ringSectionArea_m2 * 1000000 # calculate hydraulic conductivity in m²/sMPa
+  )
+
+# merge Ks back to Data
+Data <- full_join(Data, Conductivitydata, by = c("Sample", "Year"))
+
+
+
+
+
+
+
+
+
+
+# save the data
+write.csv(Data, "Output.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
