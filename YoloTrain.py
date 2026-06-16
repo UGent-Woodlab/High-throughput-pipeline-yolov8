@@ -35,10 +35,7 @@ PROJECT_ROOT = r"D:\Users\labo\Lverschuren\BlancaHoutskoolVaten"
 DATASET_FOLDER = os.path.join(PROJECT_ROOT, "TrainingdataV1YOLOV26")
 DATA_YAML = os.path.join(DATASET_FOLDER, "data.yaml")
 
-# Where all training runs should be saved. This is the important setting for
-# your issue where training output was not saved in the folder you expected.
-# Ultralytics uses project=RUNS_ROOT and name=RUN_NAME to build the final run
-# folder: RUNS_ROOT/RUN_NAME.
+# Where all training runs should be saved. 
 RUNS_ROOT = os.path.join(PROJECT_ROOT, "training_runs")
 RUN_NAME = "ModelV1"
 
@@ -52,7 +49,7 @@ MODELS_FOLDER = os.path.join(PROJECT_ROOT, "models")
 # -----------------------------
 # This can be either:
 # - a model name that Ultralytics can find/download, such as "yolo26l-seg.pt"
-# - a local path to a .pt model file
+# - a local path to a .pt model file, such as r"C\Data\yolo26l-seg.pt"
 PRETRAINED_MODEL = "yolo26l-seg.pt"
 
 # Set this to True if PRETRAINED_MODEL is a local file and you want the script to
