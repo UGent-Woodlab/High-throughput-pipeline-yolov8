@@ -99,7 +99,7 @@ MODEL_WEIGHTS = r"D:\Users\labo\Lverschuren\William\ModelYOLOv11\weights\best.pt
 # -----------------------------
 SUB_IMAGE_SIZE   = 640 # size of the moving window for YOLO segmentation; adjust based on your model, 640 default
 OVERLAP_PERCENT  = 0.5 # fraction of tile size to overlap 
-IOU_NMS          = 0.5 # IOU threshold for NMS within each tile; # Higher = allow more overlapping detections to remain. # Lower = suppress overlapping detections more aggressively. 
+IOU_NMS          = 0.5 # IOU threshold for NMS within each tile; # Higher = allow more overlapping detections to remain. # Lower = suppress overlapping detections more aggressively. This parameter is obsolete from YOLOv26 onwards and is ignored in this case. 
 PRINT_EVERY_TILE = 25 # how often to print progress during tiling
 
 # Save optional overlay images (can be large)
