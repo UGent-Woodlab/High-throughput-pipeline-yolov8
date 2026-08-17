@@ -157,7 +157,7 @@ COPY_PASTE = 0
 # Perfect bit-for-bit reproducibility can still depend on GPU, CUDA, PyTorch,
 # and Ultralytics versions, but these settings make runs much easier to compare.
 SEED = 12345
-DETERMINISTIC = True
+DETERMINISTIC = False
 
 
 
