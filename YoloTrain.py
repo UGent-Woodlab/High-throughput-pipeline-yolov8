@@ -69,7 +69,7 @@ CLASSES_TO_TRAIN = None
 # -----------------------------
 AUGMENT = True       # Whether to apply data augmentation during training. Usually recommended for better generalization. 
 PATIENCE = 0         # EarlyStopping after this many epochs without improvement; 0 disables EarlyStopping.
-BATCH_SIZE = 8       # Number of images per training batch. Adjust based on GPU memory; common values are 8, 16, or 32.
+BATCH_SIZE = -1       # Number of images per training batch. Adjust based on GPU memory; common values are 8, 16, or 32. Setting to -1 automatically calculates the maximum batch size your GPU memory (VRAM) can handle. 
 EPOCHS = 300         # Total number of training epochs. More epochs can improve performance but take longer; monitor validation metrics to avoid overfitting.
 IMAGE_SIZE = 640     # Input image size for training. Common values are 640 or 1280; larger sizes can improve accuracy but require more GPU memory and time.
 CACHE_IMAGES = True  # Whether to cache images in RAM for faster training. Set to True if you have enough RAM; otherwise, set to False to read from disk each epoch.
