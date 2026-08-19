@@ -99,6 +99,10 @@ Main features:
 - configurable project folders;
 - configurable pretrained model or local `.pt` file;
 - optional class filtering;
+- masks trained at full resolution (`MASK_DOWNSAMPLE_RATIO = 1`) instead of the
+  Ultralytics default of 4, which downsamples masks four times before training and
+  loses detail on thin structures; lower the batch size if a run no longer fits in
+  GPU memory;
 - documented augmentation settings;
 - reproducible training using a fixed random seed;
 - explicit control over the training output folder;

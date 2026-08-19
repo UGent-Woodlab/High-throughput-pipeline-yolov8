@@ -83,6 +83,10 @@ hard constraints:
 - **`PIXEL_SIZE_M` drives every physical measurement** (areas, diameters,
   vessel-group distances). Keep pixel units and metric units clearly separated
   and named (`_px` vs `_m` / `_um` suffixes, as in the existing code).
+- **Masks are trained at full resolution.** `MASK_DOWNSAMPLE_RATIO` (Ultralytics
+  `mask_ratio`) is 1 in `YoloTrain.py`, not the Ultralytics default of 4: downsampled
+  masks lose exactly the thin structures this pipeline measures. If a run does not fit
+  in GPU memory, lower the batch size, not the mask resolution.
 - **`run_config.txt` is the reproducibility record.** When you add a setting that
   affects results, also write it in `save_run_config()` in `YoloAntomicalSeg.py`.
 

@@ -62,6 +62,23 @@ REQUIRE_PRETRAINED_MODEL_EXISTS = False
 CLASSES_TO_TRAIN = None
 
 
+# -----------------------------
+# Segmentation mask settings
+# -----------------------------
+MASK_DOWNSAMPLE_RATIO = 1
+# The mask head trains on masks at 1/ratio of the image size. The Ultralytics
+# default is 4, which throws away three quarters of the mask detail before the
+# model ever sees it: thin structures such as ray cells, fiber walls, and the
+# borders between touching vessels suffer most. 1 keeps the masks at full
+# resolution, which is the best mask quality and the default here. It costs GPU
+# memory and some speed, so lower BATCH_SIZE first if a run no longer fits, and
+# only raise this to 2 when that is not enough.
+
+OVERLAP_MASK = True
+# Store the masks of one image in a single tensor, in which overlapping objects
+# are ordered. Keep this on for anatomical features, which regularly touch.
+
+
 
 
 # -----------------------------
@@ -214,6 +231,9 @@ def validate_settings():
     os.makedirs(RUNS_ROOT, exist_ok=True)
     os.makedirs(MODELS_FOLDER, exist_ok=True)
 
+    if MASK_DOWNSAMPLE_RATIO not in (1, 2, 4, 8):
+        raise ValueError("MASK_DOWNSAMPLE_RATIO must be 1, 2, 4 or 8.")
+
     if CLASSES_TO_TRAIN is not None:
         if not isinstance(CLASSES_TO_TRAIN, (list, tuple)):
             raise ValueError("CLASSES_TO_TRAIN must be None or a list/tuple of class IDs, for example [0, 2].")
@@ -270,6 +290,8 @@ def build_train_kwargs():
         imgsz=IMAGE_SIZE,
         cache=CACHE_IMAGES,
         device=DEVICE,
+        overlap_mask=OVERLAP_MASK,
+        mask_ratio=MASK_DOWNSAMPLE_RATIO,
         plots=PLOTS,
         project=RUNS_ROOT,
         name=RUN_NAME,
@@ -317,6 +339,7 @@ def print_run_summary():
     print(f"Epochs:             {EPOCHS}")
     print(f"Batch size:         {BATCH_SIZE}")
     print(f"Image size:         {IMAGE_SIZE}")
+    print(f"Mask resolution:    1/{MASK_DOWNSAMPLE_RATIO} of the image size")
     print(f"Seed:               {SEED}")
     print(f"Deterministic:      {DETERMINISTIC}")
 
