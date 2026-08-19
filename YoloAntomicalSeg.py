@@ -21,7 +21,10 @@ What this code can do per image:
      are within a configurable distance threshold
    - grouping is transitive: if A is close to B and B is close to C, then
      A, B, and C are all in one group even if A and C are not directly close
-7) Export:
+7) Stretch the dynamic range of non-8-bit input images (16-bit, float, ...)
+   before inference. The stretch is computed once on the FULL image, so all
+   tiles of one image are sent to YOLO on the same intensity scale.
+8) Export:
    - masks to logically named folders (same base filename as input)
    - optional overlay images
    - measurement visuals per feature
@@ -303,21 +306,61 @@ def ensure_dirs():
 # =============================================================================
 
 # -----------------------------
-# Image conversion / normalization
+# Image conversion / dynamic range stretching
 # -----------------------------
 # YOLO models normally expect 8-bit RGB images. However, microscopy / special
 # TIFF data can be grayscale, uint16, float, channel-first, multi-page, etc.
 # The old script passed PIL crops more directly to YOLO. To avoid silently
 # damaging special data types with img.convert("RGB"), this script now loads the
 # image as an array first and converts to RGB uint8 in a controlled way.
+#
+# Non-8-bit microscopy images normally use only a small part of their
+# theoretical value range. Without rescaling, the tiles that reach YOLO are dark
+# and low in contrast, and the anatomy is much harder to detect.
+#
+# When STRETCH_DYNAMIC_RANGE is True, every non-8-bit image is contrast
+# stretched before inference. The stretch is always computed once on the FULL
+# image, before tiling, so every tile of one image reaches YOLO on exactly the
+# same intensity scale. Stretching per tile would give neighboring tiles
+# different scales and produce visible seams in the merged mask.
+#
+# The stretch maps the STRETCH_PERCENTILE_LOW..STRETCH_PERCENTILE_HIGH
+# percentiles of the image to 0..255 and clips everything outside that window.
+# Using percentiles instead of the true min/max makes the stretch robust against
+# a few extreme outlier pixels, such as dust, scratches, or hot pixels.
+#
+# Keep these settings identical to the ones in cropimages.py, so the images the
+# model was trained on look like the images it has to segment here.
+STRETCH_DYNAMIC_RANGE = True
 
-# Normalization method for non-uint8 images:
-# - "percentile": robust contrast stretch; usually best when exposure varies
-# - "minmax": stretch actual min/max of each image
-# - "fixed_16bit": map 0..65535 to 0..255; useful for true 16-bit images
-NORMALIZATION_MODE = "percentile"
-PERCENTILE_LOW = 0.5
-PERCENTILE_HIGH = 99.5
+# Lower and upper percentile of the image histogram that become 0 and 255.
+# The default 0.5 and 99.5 stretch the middle 99% of the dynamic range, which
+# removes only the most extreme outlier pixels and keeps the image close to the
+# original tonality.
+# Use a narrower window, for example 2.5 and 97.5, for clearly more contrast:
+# that maps the middle 95% to 0..255 and clips the darkest and brightest 2.5%
+# of the pixels to pure black and pure white.
+STRETCH_PERCENTILE_LOW = 0.5
+STRETCH_PERCENTILE_HIGH = 99.5
+
+# Also stretch images that are already 8-bit. Off by default, because normal
+# 8-bit images usually already use their full range, and stretching them would
+# change images that the model already handles well.
+STRETCH_ALSO_8BIT_IMAGES = False
+
+# True  = one shared low/high value for all channels, which keeps the color
+#         balance of the original image.
+# False = stretch every channel separately. This gives more contrast, but it can
+#         shift colors when the channels have different intensity ranges.
+STRETCH_CHANNELS_JOINTLY = True
+
+# Print the value range that was mapped to 0..255 for each image.
+PRINT_STRETCH_RANGE = True
+
+# Scaling used for non-8-bit images when STRETCH_DYNAMIC_RANGE = False:
+# - "minmax":      map the real min/max of the image to 0..255
+# - "fixed_16bit": map 0..65535 to 0..255, for true 16-bit data
+FALLBACK_NORMALIZATION_MODE = "minmax"
 
 # Optional inversion. Leave False unless your model was trained on inverted data.
 INVERT_IMAGE = False
@@ -328,64 +371,96 @@ INVERT_IMAGE = False
 INPUT_CHANNEL = None
 
 
-def normalize_to_uint8(arr: np.ndarray) -> np.ndarray:
+def flat_uint8_like(arr: np.ndarray) -> np.ndarray:
+    """Return an all-zero uint8 image with the same shape, honoring INVERT_IMAGE."""
+    out = np.zeros(arr.shape, dtype=np.uint8)
+    return 255 - out if INVERT_IMAGE else out
+
+
+def stretch_to_uint8(arr: np.ndarray, label: str = "") -> np.ndarray:
     """
-    Convert an image array to uint8 safely.
+    Rescale one image array to uint8 using a dynamic range stretch.
 
     Why this is needed:
     - astype(np.uint8) is unsafe for uint16 / float microscopy images because it
       can wrap, clip, or destroy contrast.
     - PIL.convert("RGB") can also hide important datatype/channel changes.
+    - Without a stretch, non-8-bit images that use only part of their value
+      range reach YOLO as dark, low-contrast tiles.
 
-    This function keeps uint8 unchanged, and deliberately scales other data types.
+    The array can be 2D (one channel) or 3D with the channels last. All values
+    in the array are used together to find the low and high value, so pass the
+    full image here, never a single tile.
+
+    8-bit input is returned unchanged unless STRETCH_ALSO_8BIT_IMAGES is True.
     """
     arr = np.asarray(arr)
 
-    if arr.dtype == np.uint8:
+    if arr.dtype == np.uint8 and not (STRETCH_DYNAMIC_RANGE and STRETCH_ALSO_8BIT_IMAGES):
         out = arr.copy()
+        return 255 - out if INVERT_IMAGE else out
+
+    arr_float = arr.astype(np.float32)
+    finite = np.isfinite(arr_float)
+
+    # Completely empty or all-NaN input: return a flat image instead of failing.
+    if not np.any(finite):
+        return flat_uint8_like(arr_float)
+
+    values = arr_float[finite]
+
+    if STRETCH_DYNAMIC_RANGE:
+        lo, hi = np.percentile(values, [STRETCH_PERCENTILE_LOW, STRETCH_PERCENTILE_HIGH])
+        lo, hi = float(lo), float(hi)
+        range_label = f"percentile {STRETCH_PERCENTILE_LOW}-{STRETCH_PERCENTILE_HIGH}"
+
+        # Low-contrast images can give an empty percentile window. Fall back to
+        # the real min/max so such an image is still visible instead of flat.
+        if hi <= lo:
+            lo, hi = float(np.min(values)), float(np.max(values))
+            range_label += " (empty window, using min-max)"
+
+    elif FALLBACK_NORMALIZATION_MODE == "fixed_16bit":
+        lo, hi = 0.0, 65535.0
+        range_label = "fixed 16-bit"
+
+    elif FALLBACK_NORMALIZATION_MODE == "minmax":
+        lo, hi = float(np.min(values)), float(np.max(values))
+        range_label = "min-max"
+
     else:
-        arr_float = arr.astype(np.float32)
-        finite = np.isfinite(arr_float)
+        raise ValueError(
+            f"Unknown FALLBACK_NORMALIZATION_MODE: {FALLBACK_NORMALIZATION_MODE}. "
+            "Use 'minmax' or 'fixed_16bit'."
+        )
 
-        if not np.any(finite):
-            out = np.zeros(arr_float.shape, dtype=np.uint8)
-        else:
-            if NORMALIZATION_MODE == "fixed_16bit":
-                # Best when input is true 16-bit data with meaningful 0..65535 range.
-                out_float = np.clip(arr_float / 65535.0, 0, 1)
+    # A single-value image has no range to stretch.
+    if hi <= lo:
+        return flat_uint8_like(arr_float)
 
-            elif NORMALIZATION_MODE == "minmax":
-                lo = float(np.min(arr_float[finite]))
-                hi = float(np.max(arr_float[finite]))
-                if hi <= lo:
-                    out_float = np.zeros(arr_float.shape, dtype=np.float32)
-                else:
-                    out_float = np.clip((arr_float - lo) / (hi - lo), 0, 1)
+    if PRINT_STRETCH_RANGE:
+        print(f"  dynamic range{label}: {range_label}, {lo:.6g} .. {hi:.6g} -> 0 .. 255")
 
-            elif NORMALIZATION_MODE == "percentile":
-                # Robust to outlier bright/dark pixels.
-                lo, hi = np.percentile(arr_float[finite], [PERCENTILE_LOW, PERCENTILE_HIGH])
-                if hi <= lo:
-                    lo = float(np.min(arr_float[finite]))
-                    hi = float(np.max(arr_float[finite]))
+    scaled = np.clip((arr_float - lo) / (hi - lo), 0.0, 1.0)
 
-                if hi <= lo:
-                    out_float = np.zeros(arr_float.shape, dtype=np.float32)
-                else:
-                    out_float = np.clip((arr_float - lo) / (hi - lo), 0, 1)
+    # NaN/inf pixels cannot be scaled. Set them to 0 so the uint8 cast stays
+    # defined instead of producing undefined values.
+    scaled = np.where(finite, scaled, 0.0)
 
-            else:
-                raise ValueError(
-                    f"Unknown NORMALIZATION_MODE: {NORMALIZATION_MODE}. "
-                    "Use 'percentile', 'minmax', or 'fixed_16bit'."
-                )
+    out = (scaled * 255.0).round().astype(np.uint8)
+    return 255 - out if INVERT_IMAGE else out
 
-            out = (out_float * 255).round().astype(np.uint8)
 
-    if INVERT_IMAGE:
-        out = 255 - out
+def stretch_channels_to_uint8(arr_hwc: np.ndarray) -> np.ndarray:
+    """Stretch an (H, W, C) array to uint8, jointly or one channel at a time."""
+    if STRETCH_CHANNELS_JOINTLY:
+        return stretch_to_uint8(arr_hwc)
 
-    return out
+    channels = [
+        stretch_to_uint8(arr_hwc[..., c], label=f" (channel {c})")
+        for c in range(arr_hwc.shape[-1])
+    ]
+    return np.stack(channels, axis=-1)
 
 
 def array_to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
@@ -399,6 +474,9 @@ def array_to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
     - arrays with extra OME-style dimensions after indexing
 
     Output is always: (H, W, 3), dtype uint8, RGB order.
+
+    The dynamic range stretch is applied here, on the full image, before any
+    tiling happens.
     """
     arr = np.asarray(arr)
 
@@ -413,9 +491,9 @@ def array_to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
         arr = arr[OME_READ_INDEX]
         arr = np.squeeze(arr)
 
-    # 2D grayscale: normalize once and replicate to RGB.
+    # 2D grayscale: stretch once and replicate to RGB.
     if arr.ndim == 2:
-        arr8 = normalize_to_uint8(arr)
+        arr8 = stretch_to_uint8(arr)
         return np.stack([arr8, arr8, arr8], axis=-1)
 
     if arr.ndim != 3:
@@ -428,7 +506,7 @@ def array_to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
 
     # Now expect channel-last: (H, W, C).
     if arr.shape[-1] == 1:
-        arr8 = normalize_to_uint8(arr[..., 0])
+        arr8 = stretch_to_uint8(arr[..., 0])
         return np.stack([arr8, arr8, arr8], axis=-1)
 
     if arr.shape[-1] >= 2:
@@ -436,16 +514,16 @@ def array_to_rgb_uint8(arr: np.ndarray) -> np.ndarray:
             # Use one explicitly selected channel and replicate it to RGB.
             if INPUT_CHANNEL < 0 or INPUT_CHANNEL >= arr.shape[-1]:
                 raise ValueError(f"INPUT_CHANNEL={INPUT_CHANNEL} outside available channels: {arr.shape[-1]}")
-            arr8 = normalize_to_uint8(arr[..., INPUT_CHANNEL])
+            arr8 = stretch_to_uint8(arr[..., INPUT_CHANNEL])
             return np.stack([arr8, arr8, arr8], axis=-1)
 
         if arr.shape[-1] >= 3:
             # Use the first three channels as RGB. If your data is BGR or has a
             # different channel meaning, reorder/select channels here.
-            return normalize_to_uint8(arr[..., :3])
+            return stretch_channels_to_uint8(arr[..., :3])
 
         # Two-channel fallback: use channel 0 as grayscale.
-        arr8 = normalize_to_uint8(arr[..., 0])
+        arr8 = stretch_to_uint8(arr[..., 0])
         return np.stack([arr8, arr8, arr8], axis=-1)
 
     raise ValueError(f"Unsupported channel layout: {arr.shape}")
@@ -457,7 +535,8 @@ def load_image_as_rgb_uint8(path: str) -> np.ndarray:
 
     - If USE_OME_TIFF_READER is True and the file looks like OME-TIFF, try pyometiff.
     - Otherwise fall back to Pillow.
-    - Special data types are converted deliberately using normalize_to_uint8().
+    - Special data types are converted deliberately using stretch_to_uint8(),
+      which stretches the dynamic range of the full image before tiling.
 
     OME handling note:
     - OMETIFFReader.read() can return arrays with extra dimensions.
@@ -1531,6 +1610,17 @@ def save_run_config():
         f.write(f"RESOLVE_OVERLAPS = {RESOLVE_OVERLAPS}\n")
         f.write(f"FEATURE_PRIORITY = {FEATURE_PRIORITY}\n\n")
 
+        f.write("IMAGE DYNAMIC RANGE:\n")
+        f.write(f"STRETCH_DYNAMIC_RANGE = {STRETCH_DYNAMIC_RANGE}\n")
+        f.write(f"STRETCH_PERCENTILE_LOW = {STRETCH_PERCENTILE_LOW}\n")
+        f.write(f"STRETCH_PERCENTILE_HIGH = {STRETCH_PERCENTILE_HIGH}\n")
+        f.write(f"STRETCH_ALSO_8BIT_IMAGES = {STRETCH_ALSO_8BIT_IMAGES}\n")
+        f.write(f"STRETCH_CHANNELS_JOINTLY = {STRETCH_CHANNELS_JOINTLY}\n")
+        f.write(f"FALLBACK_NORMALIZATION_MODE = {FALLBACK_NORMALIZATION_MODE}\n")
+        f.write(f"INVERT_IMAGE = {INVERT_IMAGE}\n")
+        f.write(f"INPUT_CHANNEL = {INPUT_CHANNEL}\n")
+        f.write("STRETCH_SCOPE = computed once on the full image, before tiling\n\n")
+
         f.write("FEATURES:\n")
         for feat, cfg in FEATURES.items():
             f.write(f"  {feat}: {cfg}\n")
@@ -1557,7 +1647,21 @@ def save_run_config():
 #                                 MAIN
 # =============================================================================
 
+def validate_stretch_settings():
+    """Check the dynamic range settings before a long segmentation run."""
+    if not 0.0 <= STRETCH_PERCENTILE_LOW < STRETCH_PERCENTILE_HIGH <= 100.0:
+        raise ValueError(
+            "Dynamic range percentiles must satisfy "
+            "0 <= STRETCH_PERCENTILE_LOW < STRETCH_PERCENTILE_HIGH <= 100. Got: "
+            f"{STRETCH_PERCENTILE_LOW} and {STRETCH_PERCENTILE_HIGH}."
+        )
+
+    if FALLBACK_NORMALIZATION_MODE not in {"minmax", "fixed_16bit"}:
+        raise ValueError("FALLBACK_NORMALIZATION_MODE must be 'minmax' or 'fixed_16bit'.")
+
+
 def main():
+    validate_stretch_settings()
     ensure_dirs()
     save_run_config()
 

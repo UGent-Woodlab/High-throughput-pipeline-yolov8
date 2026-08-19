@@ -4,13 +4,16 @@ Crop large microscopy images into YOLO-sized training images.
 What this script does
 ---------------------
 1) Reads all images from RAW_IMAGES_FOLDER.
-2) Converts them to RGB so the output is consistent for YOLO training.
-3) Creates fixed-size crops, normally 640 x 640 pixels.
-4) Saves each crop as PNG by default.
-5) Includes the crop coordinates in the output filename.
-6) If an image is smaller than the crop size, it can be placed on a black
+2) Stretches the dynamic range of non-8-bit images (16-bit or float microscopy
+   data) over the FULL image before cropping, so the anatomy is clearly visible
+   in every crop and all crops of one image share the same intensity scale.
+3) Converts them to RGB so the output is consistent for YOLO training.
+4) Creates fixed-size crops, normally 640 x 640 pixels.
+5) Saves each crop as PNG by default.
+6) Includes the crop coordinates in the output filename.
+7) If an image is smaller than the crop size, it can be placed on a black
    640 x 640 canvas so every saved crop has the same size.
-7) Optionally copies one reproducibly random crop per original image into a
+8) Optionally copies one reproducibly random crop per original image into a
    selection folder for quick visual inspection or annotation sampling.
 
 Recommended project folder structure
@@ -31,6 +34,7 @@ import random
 import shutil
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 
@@ -92,6 +96,64 @@ OVERWRITE_EXISTING_FILES = True
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".tif", ".tiff", ".bmp")
 
 
+# -----------------------------
+# Dynamic range stretching
+# -----------------------------
+# Microscopy images are often 16-bit or float, and then normally use only a
+# small part of their theoretical value range. Converting such an image to 8-bit
+# without rescaling gives dark, low-contrast crops in which the anatomy is hard
+# to see and hard to annotate.
+#
+# When STRETCH_DYNAMIC_RANGE is True, every non-8-bit image is contrast
+# stretched first and cropped afterwards. The stretch is always computed on the
+# FULL image, never per crop, so every crop of one image stays on exactly the
+# same intensity scale and identical structures keep an identical brightness.
+#
+# The stretch maps the STRETCH_PERCENTILE_LOW..STRETCH_PERCENTILE_HIGH
+# percentiles of the image to 0..255 and clips everything outside that window.
+# Using percentiles instead of the true min/max makes the stretch robust against
+# a few extreme outlier pixels, such as dust, scratches, or hot pixels.
+#
+# Keep these settings identical to the ones in YoloAntomicalSeg.py, so the
+# images the model is trained on look like the images it must segment later.
+STRETCH_DYNAMIC_RANGE = True
+
+# Lower and upper percentile of the image histogram that become 0 and 255.
+# The default 0.5 and 99.5 stretch the middle 99% of the dynamic range, which
+# removes only the most extreme outlier pixels and keeps the image close to the
+# original tonality.
+# Use a narrower window, for example 2.5 and 97.5, for clearly more contrast:
+# that maps the middle 95% to 0..255 and clips the darkest and brightest 2.5%
+# of the pixels to pure black and pure white.
+STRETCH_PERCENTILE_LOW = 0.5
+STRETCH_PERCENTILE_HIGH = 99.5
+
+# Also stretch images that are already 8-bit. Off by default, because normal
+# 8-bit images usually already use their full range, and stretching them would
+# change the appearance of existing training data.
+STRETCH_ALSO_8BIT_IMAGES = False
+
+# True  = one shared low/high value for all channels, which keeps the color
+#         balance of the original image.
+# False = stretch every channel separately. This gives more contrast, but it can
+#         shift colors when the channels have different intensity ranges.
+STRETCH_CHANNELS_JOINTLY = True
+
+# Print the value range that was mapped to 0..255 for each image.
+PRINT_STRETCH_RANGE = True
+
+# Scaling used for non-8-bit images when STRETCH_DYNAMIC_RANGE = False:
+# - "minmax":      map the real min/max of the image to 0..255
+# - "fixed_16bit": map 0..65535 to 0..255, for true 16-bit data
+FALLBACK_NORMALIZATION_MODE = "minmax"
+
+# PIL image modes that already contain 8 bits per channel. Every other mode
+# ("I", "I;16", "F", ...) is treated as non-8-bit input.
+EIGHT_BIT_PIL_MODES = {
+    "1", "L", "LA", "P", "PA", "RGB", "RGBA", "RGBX", "CMYK", "YCbCr", "LAB", "HSV",
+}
+
+
 # =============================================================================
 #                           VALIDATION AND HELPERS
 # =============================================================================
@@ -114,6 +176,16 @@ def validate_settings():
 
     if not isinstance(PADDING_COLOR, tuple) or len(PADDING_COLOR) != 3:
         raise ValueError("PADDING_COLOR must be an RGB tuple, for example (0, 0, 0).")
+
+    if not 0.0 <= STRETCH_PERCENTILE_LOW < STRETCH_PERCENTILE_HIGH <= 100.0:
+        raise ValueError(
+            "Dynamic range percentiles must satisfy "
+            "0 <= STRETCH_PERCENTILE_LOW < STRETCH_PERCENTILE_HIGH <= 100. Got: "
+            f"{STRETCH_PERCENTILE_LOW} and {STRETCH_PERCENTILE_HIGH}."
+        )
+
+    if FALLBACK_NORMALIZATION_MODE not in {"minmax", "fixed_16bit"}:
+        raise ValueError("FALLBACK_NORMALIZATION_MODE must be 'minmax' or 'fixed_16bit'.")
 
 
 def ensure_dirs():
@@ -151,6 +223,135 @@ def safe_stem(filename):
     possible because we use only os.path.basename output from os.listdir().
     """
     return Path(filename).stem
+
+
+# =============================================================================
+#                    DYNAMIC RANGE STRETCHING AND IMAGE LOADING
+# =============================================================================
+
+def stretch_to_uint8(arr, label=""):
+    """
+    Rescale one image array to uint8 using a dynamic range stretch.
+
+    The array can be 2D (one channel) or 3D with the channels last. All values
+    in the array are used together to find the low and high value, so pass the
+    full image here, not a single crop.
+
+    Values at or below the low percentile become 0, values at or above the high
+    percentile become 255, and everything in between is scaled linearly.
+    """
+    arr_float = np.asarray(arr, dtype=np.float32)
+    finite = np.isfinite(arr_float)
+
+    # Completely empty or all-NaN input: return a black image instead of failing.
+    if not np.any(finite):
+        return np.zeros(arr_float.shape, dtype=np.uint8)
+
+    values = arr_float[finite]
+
+    if STRETCH_DYNAMIC_RANGE:
+        lo, hi = np.percentile(values, [STRETCH_PERCENTILE_LOW, STRETCH_PERCENTILE_HIGH])
+        lo, hi = float(lo), float(hi)
+        range_label = f"percentile {STRETCH_PERCENTILE_LOW}-{STRETCH_PERCENTILE_HIGH}"
+
+        # Low-contrast images can give an empty percentile window. Fall back to
+        # the real min/max so such an image is still visible instead of flat.
+        if hi <= lo:
+            lo, hi = float(np.min(values)), float(np.max(values))
+            range_label += " (empty window, using min-max)"
+
+    elif FALLBACK_NORMALIZATION_MODE == "fixed_16bit":
+        lo, hi = 0.0, 65535.0
+        range_label = "fixed 16-bit"
+
+    else:
+        lo, hi = float(np.min(values)), float(np.max(values))
+        range_label = "min-max"
+
+    # A single-value image has no range to stretch.
+    if hi <= lo:
+        return np.zeros(arr_float.shape, dtype=np.uint8)
+
+    if PRINT_STRETCH_RANGE:
+        print(f"  dynamic range{label}: {range_label}, {lo:.6g} .. {hi:.6g} -> 0 .. 255")
+
+    scaled = np.clip((arr_float - lo) / (hi - lo), 0.0, 1.0)
+
+    # NaN/inf pixels cannot be scaled. Set them to 0 so the uint8 cast stays
+    # defined instead of producing undefined values.
+    scaled = np.where(finite, scaled, 0.0)
+
+    return (scaled * 255.0).round().astype(np.uint8)
+
+
+def stretch_channels_to_uint8(arr_hwc):
+    """Stretch an (H, W, C) array to uint8, jointly or one channel at a time."""
+    if STRETCH_CHANNELS_JOINTLY:
+        return stretch_to_uint8(arr_hwc)
+
+    channels = [
+        stretch_to_uint8(arr_hwc[..., c], label=f" (channel {c})")
+        for c in range(arr_hwc.shape[-1])
+    ]
+    return np.stack(channels, axis=-1)
+
+
+def array_to_rgb_uint8(arr):
+    """
+    Convert a raw image array to an (H, W, 3) uint8 RGB array.
+
+    Handled layouts:
+    - 2D grayscale (H, W)
+    - channel-last (H, W, C)
+    - channel-first (C, H, W), which is common in scientific TIFF files
+    - arrays with extra leading dimensions, for example (Z, H, W): the first
+      plane is used
+
+    The dynamic range stretch is applied here, on the full image.
+    """
+    arr = np.squeeze(np.asarray(arr))
+
+    # Multi-page / Z-stack data: keep taking the first plane until 2D or 3D.
+    while arr.ndim > 3:
+        arr = np.squeeze(arr[0])
+
+    if arr.ndim == 2:
+        gray = stretch_to_uint8(arr)
+        return np.stack([gray, gray, gray], axis=-1)
+
+    if arr.ndim != 3:
+        raise ValueError(f"Unsupported image shape after squeezing: {arr.shape}")
+
+    if arr.shape[0] in (1, 2, 3, 4) and arr.shape[-1] not in (1, 2, 3, 4):
+        arr = np.moveaxis(arr, 0, -1)
+
+    # One or two channels: use the first channel and replicate it to RGB.
+    if arr.shape[-1] < 3:
+        gray = stretch_to_uint8(arr[..., 0])
+        return np.stack([gray, gray, gray], axis=-1)
+
+    # Three or more channels: use the first three as RGB. Reorder or select
+    # channels here if your data is BGR or has a different channel meaning.
+    return stretch_channels_to_uint8(arr[..., :3])
+
+
+def load_image_as_rgb(image_path):
+    """
+    Open one input image and return it as a PIL RGB image.
+
+    Already 8-bit images keep the plain PIL conversion, so existing behavior for
+    JPG/PNG/8-bit TIFF does not change. Non-8-bit images go through numpy, where
+    the dynamic range of the full image is stretched before any crop is taken.
+    """
+    img = Image.open(image_path)
+
+    if img.mode in EIGHT_BIT_PIL_MODES:
+        rgb = img if img.mode == "RGB" else img.convert("RGB")
+        if not (STRETCH_DYNAMIC_RANGE and STRETCH_ALSO_8BIT_IMAGES):
+            return rgb
+        return Image.fromarray(stretch_channels_to_uint8(np.asarray(rgb)))
+
+    return Image.fromarray(array_to_rgb_uint8(np.asarray(img)))
 
 
 def crop_filename(original_filename, left, upper, right, lower, padded=False):
@@ -263,28 +464,26 @@ def process_one_image(image_filename, rng):
     saved_crop_paths = []
 
     try:
-        with Image.open(image_path) as img:
-            # Convert to RGB so PNG/JPG output is consistent. This is also what
-            # YOLO normally expects for training images.
-            if img.mode != "RGB":
-                img = img.convert("RGB")
+        # Load as RGB. Non-8-bit images are dynamic range stretched over the
+        # full image here, so every crop below uses the same intensity scale.
+        img = load_image_as_rgb(image_path)
 
-            width, height = img.size
-            crop_boxes = create_crop_boxes(width, height)
+        width, height = img.size
+        crop_boxes = create_crop_boxes(width, height)
 
-            for left, upper, right, lower in crop_boxes:
-                crop_img, padded = make_fixed_size_crop(img, left, upper, right, lower)
-                out_name = crop_filename(image_filename, left, upper, right, lower, padded=padded)
-                out_path = os.path.join(CROPS_OUTPUT_FOLDER, out_name)
+        for left, upper, right, lower in crop_boxes:
+            crop_img, padded = make_fixed_size_crop(img, left, upper, right, lower)
+            out_name = crop_filename(image_filename, left, upper, right, lower, padded=padded)
+            out_path = os.path.join(CROPS_OUTPUT_FOLDER, out_name)
 
-                if os.path.exists(out_path) and not OVERWRITE_EXISTING_FILES:
-                    raise FileExistsError(
-                        "Output crop already exists and OVERWRITE_EXISTING_FILES=False:\n"
-                        f"  {out_path}"
-                    )
+            if os.path.exists(out_path) and not OVERWRITE_EXISTING_FILES:
+                raise FileExistsError(
+                    "Output crop already exists and OVERWRITE_EXISTING_FILES=False:\n"
+                    f"  {out_path}"
+                )
 
-                save_crop_image(crop_img, out_path)
-                saved_crop_paths.append(out_path)
+            save_crop_image(crop_img, out_path)
+            saved_crop_paths.append(out_path)
 
     except Exception as e:
         print(f"WARNING: Could not process {image_filename}: {e}")
@@ -315,6 +514,13 @@ def main():
     print(f"Crop size:     {CROP_SIZE[0]} x {CROP_SIZE[1]} px")
     print(f"Output format: {normalized_output_extension()}")
     print(f"Padding:       {PAD_SMALL_IMAGES} with color {PADDING_COLOR}")
+    if STRETCH_DYNAMIC_RANGE:
+        print(
+            f"Range stretch: {STRETCH_PERCENTILE_LOW}% - {STRETCH_PERCENTILE_HIGH}% "
+            f"of the full image (8-bit images included: {STRETCH_ALSO_8BIT_IMAGES})"
+        )
+    else:
+        print(f"Range stretch: off, non-8-bit scaling = {FALLBACK_NORMALIZATION_MODE}")
     print(f"Random seed:   {RANDOM_SEED}")
     print(f"Images found:  {len(image_files)}")
 

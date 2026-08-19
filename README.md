@@ -69,6 +69,11 @@ This script reads all supported images from a raw image folder and crops them in
 Main features:
 
 - reads common image formats, including `.jpg`, `.png`, `.tif`, `.tiff`, and `.bmp`;
+- stretches the dynamic range of non-8-bit images (16-bit or float microscopy data)
+  over the full image before cropping, using configurable percentiles
+  (`STRETCH_PERCENTILE_LOW` / `STRETCH_PERCENTILE_HIGH`, 0.5% - 99.5% by default;
+  use 2.5% - 97.5% for more contrast), so anatomical structures are clearly visible
+  and all crops of one image share the same intensity scale;
 - converts images to RGB for consistent YOLO training input;
 - saves crops as PNG, JPG, or TIFF;
 - includes crop coordinates in each output filename;
@@ -129,7 +134,15 @@ Main features:
 - optionally reconstructs individual objects from YOLO instance borders;
 - optionally measures anatomical objects;
 - optionally groups vessels based on distance;
-- supports controlled RGB conversion for grayscale, TIFF, OME-TIFF, uint16, float, and multichannel images.
+- supports controlled RGB conversion for grayscale, TIFF, OME-TIFF, uint16, float, and multichannel images;
+- stretches the dynamic range of non-8-bit images once on the full image before
+  tiling, with the same percentile settings as `cropimages.py`, so every tile
+  reaches the model on one common intensity scale.
+
+Keep the dynamic range settings (`STRETCH_DYNAMIC_RANGE`, `STRETCH_PERCENTILE_LOW`,
+`STRETCH_PERCENTILE_HIGH`, `STRETCH_ALSO_8BIT_IMAGES`, `STRETCH_CHANNELS_JOINTLY`)
+identical in `cropimages.py` and `YoloAntomicalSeg.py`, so the images the model is
+trained on look like the images it has to segment.
 
 
 ---
